@@ -1,4 +1,4 @@
-module tools
+module github.com/lonelybeanz/tools
 
 go 1.25.0
 
