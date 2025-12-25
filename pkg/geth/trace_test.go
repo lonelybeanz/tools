@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	rpcURL  = "https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2"
+	rpcURL  = "https://bsc-mainnet.core.chainstack.com/880"
 	address = common.HexToAddress("0x7663c5D1d17635825E596EdFd9bd96158dFCC596")
 )
 

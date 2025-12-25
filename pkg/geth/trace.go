@@ -80,6 +80,28 @@ func TraceTransaction(rpcURL, txHash string) (*TraceCall, error) {
 	return result.Result, nil
 }
 
+// TraceCall 递归结构
+type TraceCall struct {
+	Type    string       `json:"type"`
+	From    string       `json:"from"`
+	To      string       `json:"to"`
+	Value   string       `json:"value"`
+	GasUsed string       `json:"gasUsed"`
+	Input   string       `json:"input"` // ERC20 调用
+	Error   string       `json:"error,omitempty"`
+	Calls   []*TraceCall `json:"calls,omitempty"`
+}
+
+// 递归找到所有的call
+func (call *TraceCall) getAllCalls() []TraceCall {
+	var calls []TraceCall
+	calls = append(calls, *call)
+	for _, c := range call.Calls {
+		calls = append(calls, c.getAllCalls()...)
+	}
+	return calls
+}
+
 type BlockTraceResult struct {
 	TxHash string `json:"txHash"`
 	Result struct {

@@ -10,11 +10,11 @@ import (
 )
 
 type TransferToken struct {
-	Address common.Address
-	From    common.Address
-	To      common.Address
-	Amount  *big.Int
-	IsBNB   bool
+	Token  common.Address
+	From   common.Address
+	To     common.Address
+	Amount *big.Int
+	IsWBNB bool
 }
 
 func parseTxLogs(ctx context.Context, logs []*types2.Log) map[common.Hash][]*TransferToken {
@@ -107,11 +107,11 @@ func parseTransferEventLog(address common.Address, topics []common.Hash, data []
 	amountStr := data[0:32]
 	amount := new(big.Int).SetBytes(amountStr)
 	return &TransferToken{
-		Address: address,
-		From:    from,
-		To:      to,
-		Amount:  amount,
-		IsBNB:   false,
+		Token:  address,
+		From:   from,
+		To:     to,
+		Amount: amount,
+		IsWBNB: false,
 	}, nil
 }
 
@@ -124,11 +124,11 @@ func parseWithdrawalEventLog(address common.Address, topics []common.Hash, data 
 	amountStr := data[0:32]
 	amount := new(big.Int).SetBytes(amountStr)
 	return &TransferToken{
-		Address: address,
-		From:    to,
-		To:      common.Address{},
-		Amount:  amount,
-		IsBNB:   true,
+		Token:  address,
+		From:   to,
+		To:     address,
+		Amount: amount,
+		IsWBNB: true,
 	}, nil
 }
 
@@ -142,10 +142,14 @@ func parseDepositEventLog(address common.Address, topics []common.Hash, data []b
 	amount := new(big.Int).SetBytes(amountStr)
 
 	return &TransferToken{
-		Address: address,
-		From:    common.Address{},
-		To:      to,
-		Amount:  amount,
-		IsBNB:   true,
+		Token:  address,
+		From:   address,
+		To:     to,
+		Amount: amount,
+		IsWBNB: true,
 	}, nil
+}
+
+func HexToBigInt(hex string) *big.Int {
+	return new(big.Int).SetBytes(common.FromHex(hex))
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestERC20Change(t *testing.T) {
-	rpc := "https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2" // 或 archive RPC
+	rpc := "https://bsc-mainnet.core.chainstack.com/880" // 或 archive RPC
 	client, err := ethclient.Dial(rpc)
 	if err != nil {
 		t.Fatal(err)
