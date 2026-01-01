@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -214,11 +213,14 @@ type PrestateResponse struct {
 
 // PrestateTxResult 对应每笔交易的结果
 type PrestateTxResult struct {
-	TxHash string `json:"txHash"`
-	Result struct {
-		Pre  map[string]AccountState `json:"pre"`
-		Post map[string]AccountState `json:"post"`
-	} `json:"result"`
+	TxHash string              `json:"txHash"`
+	Result *AccountStateChange `json:"result"`
+	Error  interface{}         `json:"error"`
+}
+
+type AccountStateChange struct {
+	Pre  map[string]AccountState `json:"pre"`
+	Post map[string]AccountState `json:"post"`
 }
 
 // AccountState 对应账户状态
@@ -229,16 +231,6 @@ type AccountState struct {
 	// 我们不解析 storage，因为它太深且跟原生代币余额无关
 	// 定义为 RawMessage 以便忽略它而不报错
 	Storage json.RawMessage `json:"storage,omitempty"`
-}
-
-type BalanceChangeResult struct {
-	TxHash      string   // 交易哈希
-	Address     string   // 发生变化的地址
-	DeltaAmount *big.Int // 变化的金额 (正数表示入账，负数表示出账)
-	Type        string   // "IN" 或 "OUT"
-	RawPre      *big.Int // 原始 Pre 余额
-	RawPost     *big.Int // 原始 Post 余额
-
 }
 
 func TraceBlockForChange(rpcURL string, blockNumber uint64) ([]PrestateTxResult, error) {
@@ -277,4 +269,42 @@ func TraceBlockForChange(rpcURL string, blockNumber uint64) ([]PrestateTxResult,
 	}
 	return result.Result, nil
 
+}
+
+func TraceTransactionForChange(rpcURL, txHash string) (*PrestateTxResult, error) {
+	type tracerConfigObject struct {
+		OnlyTopCall bool `json:"onlyTopCall"`
+		DiffMode    bool `json:"diffMode"`
+	}
+
+	type tracerObject struct {
+		Tracer       string             `json:"tracer"`
+		Timeout      string             `json:"timeout"`
+		TracerConfig tracerConfigObject `json:"tracerConfig"`
+	}
+
+	tracerConfig := tracerConfigObject{
+		OnlyTopCall: false,
+		DiffMode:    true,
+	}
+	tracer := tracerObject{
+		Tracer:       "prestateTracer",
+		Timeout:      "5s",
+		TracerConfig: tracerConfig,
+	}
+
+	resp, err := callRPC(rpcURL, "debug_traceTransaction", []interface{}{txHash, tracer})
+	if err != nil {
+		return nil, err
+	}
+
+	var result PrestateTxResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, err
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("API error: %v", result.Error)
+	}
+
+	return &result, nil
 }

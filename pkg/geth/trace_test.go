@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	rpcURL  = "https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2"
+	rpcURL  = "https://docs-demo.bsc.quiknode.pro"
 	address = common.HexToAddress("0x7663c5D1d17635825E596EdFd9bd96158dFCC596")
 )
 
@@ -48,29 +48,9 @@ func TestTraceBlock(t *testing.T) {
 }
 
 func TestTrace(t *testing.T) {
-	b, err := GetBalanceChangeByTxHash(rpcURL, "0x36ea4f437e31137396d9f764eb36336fbfdd266c233d9ad7e88513727f9836c6", address)
+	b, err := TraceTransactionForChange(rpcURL, "0xe09b78cf5e54e51c5f84dca4cde1041723501b24de81af0c3d5a498c6ca9f7a5")
 	if err != nil {
 		log.Errorf("❌ GetBalanceChangeByTxHash error:%v", err)
 	}
-	log.Infof("✅ GetBalanceChangeByTxHash:%v", b)
-}
-
-func GetBalanceChangeByTxHash(rpcURL, txHash string, address common.Address) (*big.Int, error) {
-	// 调用 trace_transaction
-	t, err := TraceTransaction(rpcURL, txHash)
-	if err != nil {
-		log.Errorf("trace_transaction 错误:%v", err)
-		return nil, err
-	}
-
-	if common.HexToAddress(t.To) == address {
-		// 过滤掉 value = 0 的
-		val := new(big.Int)
-		val.SetString(t.Value[2:], 16)
-		if val.Sign() > 0 {
-			return val, nil
-		}
-	}
-
-	return nil, nil
+	log.Infof("✅ GetBalanceChangeByTxHash:%+v", b.Result)
 }

@@ -9,7 +9,7 @@ import (
 )
 
 func TestTxFlag(t *testing.T) {
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
+	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		t.Log(err)
 	}

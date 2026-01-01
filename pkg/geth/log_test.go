@@ -13,7 +13,7 @@ import (
 
 func TestParseTxLogs(t *testing.T) {
 
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
+	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		t.Log(err)
 	}
@@ -27,7 +27,7 @@ func TestParseTxLogs(t *testing.T) {
 	// 解析交易回执中的日志
 	logs := receipt.Logs
 
-	transfer := parseTxLogs(context.Background(), logs)
+	transfer, _ := parseTxLogs(context.Background(), logs)
 
 	t.Logf("transfers: %+v\n", transfer)
 
@@ -44,7 +44,7 @@ func TestParseTxLogs(t *testing.T) {
 	}
 	nativeCalls := ParseNativeFromTrace(traces)
 	for _, v := range nativeCalls {
-		transferTracker.AddTransfer(v.From, v.To, BNB, v.Amount)
+		transferTracker.AddTransfer(v.From, v.To, BNB.Address, v.Amount)
 	}
 
 	for _, vv := range transferTracker.GetAllAccounts() {

@@ -8,10 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-)
-
-var (
-	BNB = common.HexToAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
+	"github.com/lonelybeanz/tools/pkg/log"
 )
 
 /* ============================================================
@@ -47,6 +44,32 @@ func ParseNativeFromTrace(root *TraceCall) []*NativeTransfer {
 	return out
 }
 
+func ParseNativeChange(balanceChangeResult *PrestateTxResult) map[common.Address]*AssetChange {
+	changes := make(map[common.Address]*AssetChange)
+	if balanceChangeResult.Result == nil {
+		return changes
+	}
+	pre := balanceChangeResult.Result.Pre
+	post := balanceChangeResult.Result.Post
+	for address, v := range pre {
+		addressPost := post[address]
+		if addressPost.Balance == "" {
+			continue
+		}
+		change := new(big.Int).Sub(HexToBigInt(addressPost.Balance), HexToBigInt(v.Balance))
+		log.Debugf("address:%s %s -> %s", address, v.Balance, addressPost.Balance)
+		if change.Sign() != 0 {
+			changes[common.HexToAddress(address)] = &AssetChange{
+				Tokens: map[common.Address]*big.Int{
+					BNB.Address: change,
+				},
+			}
+		}
+
+	}
+	return changes
+}
+
 type AssetChange struct {
 	Tokens map[common.Address]*big.Int // tokenAddress -> amount
 }
@@ -58,7 +81,7 @@ func CalculateTransactionVolume(
 
 	changes := make(map[common.Address]*AssetChange)
 
-	transfer := parseTxLogs(context.Background(), logs)
+	transfer, _ := parseTxLogs(context.Background(), logs)
 
 	transferTracker := NewTransferTracker("")
 	for _, v := range transfer {
@@ -69,7 +92,7 @@ func CalculateTransactionVolume(
 
 	nativeCalls := ParseNativeFromTrace(traceRoot)
 	for _, v := range nativeCalls {
-		transferTracker.AddTransfer(v.From, v.To, BNB, v.Amount)
+		transferTracker.AddTransfer(v.From, v.To, BNB.Address, v.Amount)
 	}
 
 	for _, vv := range transferTracker.GetAllAccounts() {
@@ -95,20 +118,70 @@ func CalculateTransactionVolume(
 	return changes
 }
 
-// ---------------- SwapVolume ----------------
+func CalculateTransactionTokenBalanceChanges(
+	logs []*types.Log,
+	balanceChangeResult *PrestateTxResult,
+) (
+	map[common.Address]*AssetChange,
+	map[common.Hash]bool,
+) {
+	var changes map[common.Address]*AssetChange
+
+	// 解析 ERC20 代币转账
+	transfer, swapHashs := parseTxLogs(context.Background(), logs)
+
+	// 创建转账追踪器
+	transferTracker := NewTransferTracker("")
+	for _, v := range transfer {
+		for _, vv := range v {
+			transferTracker.AddTransfer(vv.From, vv.To, vv.Token, vv.Amount)
+		}
+	}
+
+	// 从 balance change 计算原生代币转账
+	changes = ParseNativeChange(balanceChangeResult)
+
+	// 遍历所有涉及的账户，计算余额变化
+	for _, addr := range transferTracker.GetAllAccounts() {
+		tokenChanges := &AssetChange{
+			Tokens: make(map[common.Address]*big.Int),
+		}
+
+		// 获取该账户所有代币的净余额变化
+		for _, token := range transferTracker.GetAllTokens() {
+			netBalance := transferTracker.GetNetBalance(addr, token)
+			if netBalance.Cmp(big.NewInt(0)) != 0 {
+				tokenChanges.Tokens[token] = netBalance
+			}
+		}
+
+		if len(tokenChanges.Tokens) > 0 {
+			changes[addr] = tokenChanges
+		}
+	}
+
+	return changes, swapHashs
+}
+
+// ---------------- MaxSwapVolumeUSD ----------------
 // tokenPrice: tokenAddress -> USD 价格
 // 稳定币直接填 1
-func SwapVolume(changes map[common.Address]*AssetChange, tokenPrice map[common.Address]float64) float64 {
+func MaxSwapVolumeUSD(changes map[common.Address]*AssetChange, tokenPrice map[common.Address]*TokenPrice) float64 {
 	maxValue := 0.0
 
 	for _, ac := range changes {
+		var price float64
 		for token, amt := range ac.Tokens {
-			price, ok := tokenPrice[token]
+			tokenPrice, ok := tokenPrice[token]
 			if !ok {
-				price = 0.0
+				continue
 			}
-			// Use big.Float for calculation to avoid overflow
-			v := new(big.Float).Quo(new(big.Float).SetInt(amt), new(big.Float).SetFloat64(1e18))
+			price = tokenPrice.Price
+			baseDecimal := tokenPrice.Decimal
+
+			log.Debugf("amt: %s,token: %+v", amt.String(), tokenPrice)
+
+			v := new(big.Float).Quo(new(big.Float).SetInt(amt), new(big.Float).SetFloat64(math.Pow10(baseDecimal)))
 			v.Mul(v, new(big.Float).SetFloat64(price))
 			value, _ := v.Float64()
 			value = math.Abs(value)

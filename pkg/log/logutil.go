@@ -13,8 +13,22 @@ var (
 
 // 自动检测是否在测试模式
 func isInTest() bool {
-	// 判断当前程序名是否包含 "test"
-	return strings.HasSuffix(os.Args[0], ".test")
+	//
+	// [0] = "/Users/dujiao/repositories/projects/scutum/scutum-sync/internal/model/__debug_bin2374299233"
+	// [1] = "-test.run"
+	// [2] = "^TestSnapshot$"
+	// 判断当前程序名是否包含 "test" 或者 "debug"
+	args := os.Args
+	if len(args) < 2 {
+		return false
+	}
+	if strings.HasSuffix(os.Args[0], ".test") {
+		return true
+	}
+	if args[1] == "-test.run" {
+		return true
+	}
+	return strings.HasSuffix(os.Args[0], "debug")
 }
 
 // Debugf 只在测试时打印

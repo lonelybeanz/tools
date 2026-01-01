@@ -11,7 +11,7 @@ import (
 )
 
 func TestTxVolume(t *testing.T) {
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
+	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		t.Log(err)
 	}
@@ -34,12 +34,12 @@ func TestTxVolume(t *testing.T) {
 
 }
 
-func TestSwapVolume(t *testing.T) {
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
+func TestCalculateTransactionVolume(t *testing.T) {
+	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		t.Log(err)
 	}
-	txHash := "0x3bbc751d4466f6287faf4955429d12cd0f99c02209d454ac0bf139434396f06c"
+	txHash := "0xe09b78cf5e54e51c5f84dca4cde1041723501b24de81af0c3d5a498c6ca9f7a5"
 	// 获取交易回执
 	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
 	if err != nil {
@@ -49,22 +49,48 @@ func TestSwapVolume(t *testing.T) {
 	// 解析交易回执中的日志
 	logs := receipt.Logs
 
-	traces, err := TraceTransaction(rpcURL, txHash)
+	traces, err := TraceTransactionForChange(rpcURL, txHash)
 	if err != nil {
 		log.Errorf("trace_transaction 错误:%v", err)
 	}
-	changes := CalculateTransactionVolume(logs, traces)
-	t.Log(changes)
+	vr, _ := CalculateTransactionTokenBalanceChanges(logs, traces)
+	t.Log(vr)
+}
 
-	// 定义价格 map
-	tokenPrice := map[common.Address]float64{
-		common.HexToAddress("0x8AC76a51cc950d9822D68b5bA99a72108E0598D6"): 1.0,
-		common.HexToAddress("0x55d398326f99059fF775485246999027B3197955"): 1.0,
-		BNB: 837.0,
-		common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"): 837.0,
+func TestSwapVolume(t *testing.T) {
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		t.Log(err)
+	}
+	txHash := "0xe09b78cf5e54e51c5f84dca4cde1041723501b24de81af0c3d5a498c6ca9f7a5"
+	// 获取交易回执
+	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
+	if err != nil {
+		t.Log(err)
 	}
 
-	swapVolume := SwapVolume(changes, tokenPrice)
+	// 解析交易回执中的日志
+	logs := receipt.Logs
 
-	fmt.Println("Transaction swap volume (USD):", swapVolume)
+	traces, err := TraceTransactionForChange(rpcURL, txHash)
+	if err != nil {
+		log.Errorf("trace_transaction 错误:%v", err)
+	}
+	changes, swapHashs := CalculateTransactionTokenBalanceChanges(logs, traces)
+	if swapHashs[receipt.TxHash] {
+		// 定义价格 map
+		tokenPrice := map[common.Address]*TokenPrice{
+			BNB.Address:  BNB.SetTokenPrice(867.69),
+			WBNB.Address: WBNB.SetTokenPrice(867.69),
+			USDT.Address: &USDT,
+			USDC.Address: &USDC,
+			USD1.Address: &USD1,
+			WBTC.Address: WBTC.SetTokenPrice(87162.00),
+		}
+
+		swapVolume := MaxSwapVolumeUSD(changes, tokenPrice)
+
+		fmt.Printf("Transaction swap volume (USD):$%.18f\n", swapVolume)
+	}
+
 }
