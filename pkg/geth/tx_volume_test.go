@@ -11,7 +11,7 @@ import (
 )
 
 func TestTxVolume(t *testing.T) {
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/880")
+	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
 	if err != nil {
 		t.Log(err)
 	}
@@ -35,7 +35,7 @@ func TestTxVolume(t *testing.T) {
 }
 
 func TestSwapVolume(t *testing.T) {
-	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/880")
+	client, err := ethclient.Dial("https://bsc-mainnet.core.chainstack.com/8584b635eccbec059338b0095fbe83d2")
 	if err != nil {
 		t.Log(err)
 	}
