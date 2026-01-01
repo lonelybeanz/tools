@@ -193,3 +193,17 @@ func MaxSwapVolumeUSD(changes map[common.Address]*AssetChange, tokenPrice map[co
 
 	return maxValue
 }
+
+func GetMaxSwapVolumeUSD(
+	logs []*types.Log,
+	balanceChangeResult *PrestateTxResult,
+	tokenPrice map[common.Address]*TokenPrice,
+) float64 {
+	changes, swapHashs := CalculateTransactionTokenBalanceChanges(logs, balanceChangeResult)
+	if swapHashs[common.HexToHash(balanceChangeResult.TxHash)] {
+		return MaxSwapVolumeUSD(changes, tokenPrice)
+	} else {
+		return 0.0
+	}
+
+}

@@ -306,5 +306,7 @@ func TraceTransactionForChange(rpcURL, txHash string) (*PrestateTxResult, error)
 		return nil, fmt.Errorf("API error: %v", result.Error)
 	}
 
+	result.TxHash = txHash
+
 	return &result, nil
 }
