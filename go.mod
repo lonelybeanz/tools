@@ -6,6 +6,7 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.19.0
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cast v1.10.0
 	github.com/zeromicro/go-zero v1.9.3
 	go.uber.org/zap v1.27.1
