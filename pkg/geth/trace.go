@@ -271,7 +271,7 @@ func TraceBlockForChange(rpcURL string, blockNumber uint64) ([]PrestateTxResult,
 
 }
 
-func TraceTransactionForChange(rpcURL, txHash string) (*PrestateTxResult, error) {
+func TraceTransactionForChange(rpcURL, method, txHash string) (*PrestateTxResult, error) {
 	type tracerConfigObject struct {
 		OnlyTopCall bool `json:"onlyTopCall"`
 		DiffMode    bool `json:"diffMode"`
@@ -292,8 +292,11 @@ func TraceTransactionForChange(rpcURL, txHash string) (*PrestateTxResult, error)
 		Timeout:      "5s",
 		TracerConfig: tracerConfig,
 	}
-
-	resp, err := callRPC(rpcURL, "debug_traceTransaction", []interface{}{txHash, tracer})
+	debugMethod := "debug_traceTransaction"
+	if method != "" {
+		debugMethod = method
+	}
+	resp, err := callRPC(rpcURL, debugMethod, []interface{}{txHash, tracer})
 	if err != nil {
 		return nil, err
 	}

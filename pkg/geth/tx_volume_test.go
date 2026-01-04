@@ -49,7 +49,7 @@ func TestCalculateTransactionVolume(t *testing.T) {
 	// 解析交易回执中的日志
 	logs := receipt.Logs
 
-	traces, err := TraceTransactionForChange(rpcURL, txHash)
+	traces, err := TraceTransactionForChange(rpcURL, "", txHash)
 	if err != nil {
 		log.Errorf("trace_transaction 错误:%v", err)
 	}
@@ -62,7 +62,7 @@ func TestSwapVolume(t *testing.T) {
 	if err != nil {
 		t.Log(err)
 	}
-	txHash := "0xe09b78cf5e54e51c5f84dca4cde1041723501b24de81af0c3d5a498c6ca9f7a5"
+	txHash := "0x1ae703b727c8241bda04be188617834809eba62f8ea2a5594fb06efe6c1958b2"
 	// 获取交易回执
 	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
 	if err != nil {
@@ -72,7 +72,7 @@ func TestSwapVolume(t *testing.T) {
 	// 解析交易回执中的日志
 	logs := receipt.Logs
 
-	traces, err := TraceTransactionForChange(rpcURL, txHash)
+	traces, err := TraceTransactionForChange(rpcURL, "", txHash)
 	if err != nil {
 		log.Errorf("trace_transaction 错误:%v", err)
 	}
