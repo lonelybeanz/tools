@@ -32,6 +32,17 @@ type ActionResult struct {
 	TxTo            string      `json:"txTo"`
 }
 
+type tracerConfigObject struct {
+	OnlyTopCall bool `json:"onlyTopCall"`
+	DiffMode    bool `json:"diffMode"`
+}
+
+type tracerObject struct {
+	Tracer       string             `json:"tracer"`
+	Timeout      string             `json:"timeout"`
+	TracerConfig tracerConfigObject `json:"tracerConfig"`
+}
+
 func callRPC(rpcURL, method string, params []interface{}) ([]byte, error) {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -234,16 +245,6 @@ type AccountState struct {
 }
 
 func TraceBlockForChange(rpcURL string, blockNumber uint64) ([]PrestateTxResult, error) {
-	type tracerConfigObject struct {
-		OnlyTopCall bool `json:"onlyTopCall"`
-		DiffMode    bool `json:"diffMode"`
-	}
-
-	type tracerObject struct {
-		Tracer       string             `json:"tracer"`
-		Timeout      string             `json:"timeout"`
-		TracerConfig tracerConfigObject `json:"tracerConfig"`
-	}
 
 	tracerConfig := tracerConfigObject{
 		OnlyTopCall: false,
@@ -272,16 +273,6 @@ func TraceBlockForChange(rpcURL string, blockNumber uint64) ([]PrestateTxResult,
 }
 
 func TraceTransactionForChange(rpcURL, method, txHash string) (*PrestateTxResult, error) {
-	type tracerConfigObject struct {
-		OnlyTopCall bool `json:"onlyTopCall"`
-		DiffMode    bool `json:"diffMode"`
-	}
-
-	type tracerObject struct {
-		Tracer       string             `json:"tracer"`
-		Timeout      string             `json:"timeout"`
-		TracerConfig tracerConfigObject `json:"tracerConfig"`
-	}
 
 	tracerConfig := tracerConfigObject{
 		OnlyTopCall: false,
@@ -312,4 +303,21 @@ func TraceTransactionForChange(rpcURL, method, txHash string) (*PrestateTxResult
 	result.TxHash = txHash
 
 	return &result, nil
+}
+
+func Trace(rpcURL, method string, req []interface{}, resp interface{}) error {
+	debugMethod := "debug_traceTransaction"
+	if method != "" {
+		debugMethod = method
+	}
+	result, err := callRPC(rpcURL, debugMethod, req)
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return err
+	}
+
+	return nil
 }

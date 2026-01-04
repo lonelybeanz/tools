@@ -47,8 +47,17 @@ func TestTraceBlock(t *testing.T) {
 	// log.Infof("✅ GetBlockByNumber:%v", block)
 }
 
-func TestTrace(t *testing.T) {
+func TestTraceTx(t *testing.T) {
 	b, err := TraceTransactionForChange(rpcURL, "", "0xe09b78cf5e54e51c5f84dca4cde1041723501b24de81af0c3d5a498c6ca9f7a5")
+	if err != nil {
+		log.Errorf("❌ GetBalanceChangeByTxHash error:%v", err)
+	}
+	log.Infof("✅ GetBalanceChangeByTxHash:%+v", b.Result)
+}
+
+func TestTrace(t *testing.T) {
+	var b PrestateTxResult
+	err := Trace(rpcURL, "scutum_allBalanceChangeByTx", []interface{}{"0xf27b372ab6b78623171eeadc578a2499457ddfba3c8072490ac41f5010e016e9"}, &b)
 	if err != nil {
 		log.Errorf("❌ GetBalanceChangeByTxHash error:%v", err)
 	}
