@@ -22,6 +22,7 @@ type Config struct {
 	Level       string `yaml:"level"`       // 日志级别: debug, info, warn, error
 	Compress    bool   `yaml:"compress"`    // 是否压缩旧文件
 	Development bool   `yaml:"development"` // 是否为开发模式
+	MsgOnly     bool   `yaml:"msgOnly"`     // 是否只输出 message 字段
 }
 
 func init() {
@@ -46,16 +47,16 @@ func InitLogger(filePath string, maxSize, maxBackups, maxAge int) {
 		Development: false,
 	}
 
-	_ = InitLoggerWithConfig(config)
+	globalLogger, _ = InitLoggerWithConfig(config)
 }
 
 // InitLoggerWithConfig 使用配置初始化日志
-func InitLoggerWithConfig(config Config) error {
+func InitLoggerWithConfig(config Config) (*zap.SugaredLogger, error) {
 	// 确保日志目录存在
 	dir := filepath.Dir(config.FilePath)
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("创建日志目录失败: %w", err)
+			return nil, fmt.Errorf("创建日志目录失败: %w", err)
 		}
 	}
 
@@ -74,7 +75,7 @@ func InitLoggerWithConfig(config Config) error {
 	// 2. 解析日志级别
 	logLevel := zapcore.DebugLevel
 	if err := logLevel.Set(config.Level); err != nil {
-		return fmt.Errorf("解析日志级别失败: %w", err)
+		return nil, fmt.Errorf("解析日志级别失败: %w", err)
 	}
 
 	// 3. 创建不同级别的 Core
@@ -83,6 +84,10 @@ func InitLoggerWithConfig(config Config) error {
 	// --- 文件输出 Core ---
 	// INFO 级别及以下
 	infoLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		// 当 MsgOnly 开启时，这个 core 不再处理 Info 级别
+		if config.MsgOnly && lvl == zapcore.InfoLevel {
+			return false
+		}
 		return lvl >= logLevel && lvl < zapcore.WarnLevel
 	})
 	infoWriter := getLogWriter(config.FilePath, config.MaxSize, config.MaxBackups, config.MaxAge, config.Compress)
@@ -110,6 +115,22 @@ func InitLoggerWithConfig(config Config) error {
 		cores = append(cores, zapcore.NewCore(consoleEncoder, consoleWriter, consoleLevel))
 	}
 
+	if config.MsgOnly {
+		customFilePath := getCustomLogFilePath(config.FilePath, "msg")
+		infoWriter := getLogWriter(customFilePath, config.MaxSize, config.MaxBackups, config.MaxAge, config.Compress)
+		// ✅ 核心：创建一个只允许 Info 级别的 Enabler
+		infoOnlyEnabler := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+			return lvl == zapcore.InfoLevel
+		})
+		cores = append(cores, zapcore.NewCore(
+			zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+				MessageKey: "msg", // 只输出 message
+			}),
+			infoWriter,
+			infoOnlyEnabler,
+		))
+	}
+
 	// 4. 使用 NewTee 合并所有 Core
 	core := zapcore.NewTee(cores...)
 
@@ -124,9 +145,8 @@ func InitLoggerWithConfig(config Config) error {
 	}
 
 	logger := zap.New(core, options...)
-	globalLogger = logger.Sugar()
 
-	return nil
+	return logger.Sugar(), nil
 }
 
 // getLogWriter 返回一个 lumberjack.Logger
@@ -147,6 +167,13 @@ func getErrorLogFilePath(filePath string) string {
 	ext := filepath.Ext(filePath)
 	base := strings.TrimSuffix(filePath, ext)
 	return base + ".error" + ext
+}
+
+// 获得自定义日志路径
+func getCustomLogFilePath(filePath, customName string) string {
+	ext := filepath.Ext(filePath)
+	base := strings.TrimSuffix(filePath, ext)
+	return base + "." + customName + ext
 }
 
 // Sync 刷新缓存 (建议在 main 退出前 defer 调用)

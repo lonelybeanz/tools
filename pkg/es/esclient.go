@@ -8,16 +8,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
-	"github.com/zeromicro/go-zero/core/logx"
 )
+
+var (
+	EsClient *elasticsearch.Client
+	esMutex  sync.RWMutex
+)
+
+var ErrVersionConflict = errors.New("version conflict detected (409)")
 
 //	dialer := &net.Dialer{
 //		Timeout:   30 * time.Second,
@@ -43,15 +49,12 @@ var sharedTransport = &http.Transport{
 	},
 }
 
-var EsClient *elasticsearch.Client
-
 func EsClientStart(addressesStr, username, password string) {
 	InitEs(addressesStr, username, password)
-	logx.Info("elasticsearch connect success")
 	go func() {
 		for {
 			if !CheckEsHealth() {
-				logx.Error("ES 不可用，尝试重新初始化...")
+				esLogger.Error("ES不可用,尝试重新初始化...")
 				InitEs(addressesStr, username, password)
 			}
 			time.Sleep(30 * time.Second)
@@ -68,11 +71,17 @@ func InitEs(addressesStr, username, password string) {
 		Transport: sharedTransport,
 	}
 
-	var err error
-	EsClient, err = elasticsearch.NewClient(cfg)
+	newClient, err := elasticsearch.NewClient(cfg)
 	if err != nil {
-		log.Fatalf("Error creating the client: %s", err)
+		esLogger.Errorf("Error creating the client: %s", err)
+		return
 	}
+
+	esMutex.Lock()
+	defer esMutex.Unlock()
+	// 如果旧的 EsClient 存在，理论上应该先安全关闭它的连接，但这比较复杂。
+	// go-elasticsearch 的 transport 是共享的，所以替换 Client 实例通常是安全的。
+	EsClient = newClient
 
 }
 
@@ -83,31 +92,43 @@ func SafeClose(res *esapi.Response) {
 	}
 }
 
-func DoESRequest(ctx context.Context, req func(ctx context.Context) (*esapi.Response, error)) ([]byte, error) {
-	var lastErr error
+func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elasticsearch.Client) (*esapi.Response, error)) ([]byte, error) {
+	esMutex.RLock()
+	if EsClient == nil {
+		esMutex.RUnlock()
+		return nil, errors.New("es client is not initialized")
+	}
+	client := EsClient
+	esMutex.RUnlock() // 拿到 client 后即可解锁
 
+	var lastErr error
 	for i := 0; i < 3; i++ {
-		res, err := req(ctx)
+		// ✅ 在每次循环开始时检查 context
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		res, err := req(ctx, client)
 
 		if err != nil {
 			SafeClose(res) // Even on error, res might be non-nil with a body that needs closing.
 			var netErr net.Error
 			// 检查是否是网络错误（包括超时）
 			if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
-				logx.Errorf("es request network error, retrying... (%d/3): %v", i+1, err)
+				esLogger.Errorf("⚠️ es request network error, retrying... (%d/3): %v", i+1, err)
 				lastErr = err
 				time.Sleep(time.Duration(i+1) * time.Second) // 增加重试等待时间
 				continue
 			}
 			// 检查是否是EOF错误
 			if errors.Is(err, io.EOF) {
-				logx.Errorf("es request EOF error, retrying... (%d/3): %v", i+1, err)
+				esLogger.Errorf("⚠️ es request EOF error, retrying... (%d/3): %v", i+1, err)
 				lastErr = err
 				time.Sleep(time.Duration(i+1) * time.Second)
 				continue
 			}
 			// 对于其他未知错误，直接返回
-			return nil, fmt.Errorf("es request failed: %w", err)
+			return nil, fmt.Errorf("❌ es request failed: %w", err)
 		}
 
 		bodyBytes, readErr := io.ReadAll(res.Body)
@@ -116,7 +137,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context) (*esapi.Resp
 
 		if readErr != nil {
 			// 读取响应体失败，也认为是一种可重试的网络问题
-			logx.Errorf("es response read failed, retrying... (%d/3): %v", i+1, readErr)
+			esLogger.Errorf("es response read failed, retrying... (%d/3): %v", i+1, readErr)
 			lastErr = readErr
 			time.Sleep(time.Duration(i+1) * time.Second)
 			continue
@@ -125,7 +146,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context) (*esapi.Resp
 		if res.IsError() {
 			// 对于 5xx 系列的服务器错误，进行重试
 			if res.StatusCode >= 500 && res.StatusCode < 600 {
-				logx.Errorf("es response server error with status code %d, retrying... (%d/3). Body: %s", res.StatusCode, i+1, string(bodyBytes))
+				esLogger.Errorf("es response server error with status code %d, retrying... (%d/3). Body: %s", res.StatusCode, i+1, string(bodyBytes))
 				lastErr = fmt.Errorf("es response error with status code %d: %s", res.StatusCode, string(bodyBytes))
 				time.Sleep(time.Duration(i+1) * time.Second)
 				continue
@@ -147,23 +168,26 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context) (*esapi.Resp
 }
 
 func CheckEsHealth() bool {
+	esMutex.RLock()
+	if EsClient == nil {
+		esMutex.RUnlock()
+		return false
+	}
+	// 捕获客户端以在解锁后使用
+	client := EsClient
+	esMutex.RUnlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	res, err := EsClient.Ping(EsClient.Ping.WithContext(ctx))
+	res, err := client.Ping(client.Ping.WithContext(ctx))
 	if err != nil {
-		logx.Error("ES Ping 失败:", err)
+		esLogger.Error("ES Ping 失败:", err)
 		return false
 	}
 
 	defer SafeClose(res)
-	_, err = io.ReadAll(res.Body)
-	if err != nil {
-		logx.Error("ES Ping 读取响应失败:", err)
-		return false
-	}
-
 	if res.StatusCode >= 400 {
-		logx.Error("ES 返回错误状态码:", res.StatusCode)
+		esLogger.Error("ES 返回错误状态码:", res.StatusCode)
 		return false
 	}
 	return true
@@ -180,24 +204,44 @@ type ESBulkResponse struct {
 	} `json:"items"`
 }
 
-func SaveToEs(indexName string, buffer bytes.Buffer) error {
+func SaveAndRetry(indexName string, buffer bytes.Buffer) error {
+	return saveAndRetryWithLimit(indexName, buffer, 5) // 默认最大重试5次
+}
+
+// 带重试次数限制的内部函数
+func saveAndRetryWithLimit(indexName string, buffer bytes.Buffer, retriesLeft int) error {
+	timeOut := time.Duration(60-retriesLeft*10) * time.Second
+	err := SaveToEs(indexName, buffer, timeOut)
+	if err != nil {
+		esLogger.Error("保存数据到ES失败:", err)
+
+		// 检查是否还有重试次数
+		if retriesLeft <= 0 {
+			esLogger.Error("保存数据到ES失败,已达到最大重试次数")
+			return err
+		}
+
+		// 递归调用，减少重试次数
+		return saveAndRetryWithLimit(indexName, buffer, retriesLeft-1)
+	}
+	return nil
+}
+
+func SaveToEs(indexName string, buffer bytes.Buffer, timeOut time.Duration) error {
 
 	// 打印完整的POST语句供后续补偿
-	WriteSaveLog(buffer.String())
+	WriteMsgLog(buffer.String())
 
-	// start := time.Now()
-
-	// for attempt := 1; ; attempt++ {
-	// 设置最大超时时间为 5 秒
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	bodyBytes, err := DoESRequest(ctx, func(ctx context.Context) (*esapi.Response, error) {
-		return EsClient.Bulk(
+	// 设置最大超时时间
+	ctx, cancel := context.WithTimeout(context.Background(), timeOut)
+	defer cancel()
+	bodyBytes, err := DoESRequest(ctx, func(ctx context.Context, client *elasticsearch.Client) (*esapi.Response, error) {
+		return client.Bulk(
 			bytes.NewReader(buffer.Bytes()),
-			EsClient.Bulk.WithContext(ctx),
+			client.Bulk.WithContext(ctx),
 			// EsDB.Bulk.WithRefresh("wait_for"), // ✅ 自动等待可见
 		)
 	})
-	cancel() // ✅ 立即 cancel
 	if err != nil {
 		return err
 	}
@@ -205,7 +249,7 @@ func SaveToEs(indexName string, buffer bytes.Buffer) error {
 	var esResp ESBulkResponse
 	err = json.Unmarshal(bodyBytes, &esResp)
 	if err != nil {
-		logx.Errorf("[saveToEs] 解析响应失败: %v", err)
+		esLogger.Errorf("[saveToEs] 解析响应失败: %v", err)
 		return fmt.Errorf("saveToEs failed: %v", err)
 	}
 
@@ -213,7 +257,7 @@ func SaveToEs(indexName string, buffer bytes.Buffer) error {
 		for _, item := range esResp.Items {
 			for _, result := range item {
 				if result.Status == 409 && result.Error.Type == "version_conflict_engine_exception" {
-					return errors.New("409")
+					return ErrVersionConflict
 				}
 			}
 		}

@@ -8,6 +8,25 @@ func TestInit(t *testing.T) {
 	// 测试默认配置初始化
 	InitLogger("./logs/test.log", 100, 3, 28)
 
+}
+
+func TestLog(t *testing.T) {
+	// 测试默认配置初始化
+	InitLogger("./logs/test.log", 100, 3, 28)
+
+	globalLogger.Info("hello world")
+	globalLogger.Error("error")
+	// globalLogger.Fatal("fatal")
+	globalLogger.Warn("warn")
+	globalLogger.Debug("debug")
+
+	Infof("hello world %s", "info")
+	Errorf("hello world %s", "error")
+	Debugf("hello world %s", "debug")
+	// Fatalf("hello world %s", "fatal")
+}
+
+func TestLogMsgOnly(t *testing.T) {
 	// 测试自定义配置初始化
 	config := Config{
 		FilePath:    "./logs/test_config.log",
@@ -16,14 +35,17 @@ func TestInit(t *testing.T) {
 		MaxAge:      7,
 		Level:       "info",
 		Compress:    true,
-		Development: true,
+		Development: false,
+		MsgOnly:     true,
 	}
-
-	if err := InitLoggerWithConfig(config); err != nil {
+	globalLogger, err := InitLoggerWithConfig(config)
+	if err != nil {
 		t.Fatalf("初始化日志失败: %v", err)
 	}
-}
+	globalLogger.Info("hello world")
+	globalLogger.Error("error")
 
+}
 func TestLog1(t *testing.T) {
 
 	defer Sync() // 退出前刷盘
