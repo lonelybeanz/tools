@@ -21,12 +21,12 @@ const (
 )
 
 type PagerRequest struct {
-	Index      string        `json:"index"`
-	Size       int           `json:"size"`
-	Filters    []interface{} `json:"filters"`   // 筛选结构
-	SortTime   string        `json:"sort_time"` // 排序结构
-	Direction  PageDirection `json:"direction"`
-	AfterValue []interface{} `json:"after_value"` // 只有 Next 和 Prev 需要
+	Index      string                 `json:"index"`
+	Size       int                    `json:"size"`
+	Filters    map[string]interface{} `json:"filters"`   // 筛选结构
+	SortTime   string                 `json:"sort_time"` // 排序结构
+	Direction  PageDirection          `json:"direction"`
+	AfterValue []interface{}          `json:"after_value"` // 只有 Next 和 Prev 需要
 
 }
 
