@@ -23,25 +23,18 @@ var (
 
 var ErrVersionConflict = errors.New("version conflict detected (409)")
 
-//	dialer := &net.Dialer{
-//		Timeout:   30 * time.Second,
-//		KeepAlive: 30 * time.Second,
-//	}
+var dialer = &net.Dialer{
+	Timeout:   30 * time.Second,
+	KeepAlive: 30 * time.Second,
+}
 var sharedTransport = &http.Transport{
-	// DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-	// 	conn, err := dialer.DialContext(ctx, network, addr)
-	// 	if err == nil {
-	// 		fmt.Println("DialContext: new connection to", addr)
-	// 	}
-	// 	return conn, err
-	// },
-	MaxIdleConns:        200,
-	MaxIdleConnsPerHost: 200,
-	// MaxConnsPerHost:       300,
+	DialContext:           dialer.DialContext,
+	MaxIdleConns:          100,
+	MaxIdleConnsPerHost:   100,
+	MaxConnsPerHost:       100,
 	IdleConnTimeout:       90 * time.Second,
 	ResponseHeaderTimeout: 10 * time.Second, // 控制服务器响应的最大等待时间
 	ExpectContinueTimeout: 1 * time.Second,
-	// DisableKeepAlives: true,
 	TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // 跳过证书验证（⚠️ 仅限开发环境）
 	},
@@ -100,7 +93,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 	esMutex.RUnlock() // 拿到 client 后即可解锁
 
 	var lastErr error
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		// ✅ 在每次循环开始时检查 context
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
