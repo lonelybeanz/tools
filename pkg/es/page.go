@@ -21,12 +21,12 @@ const (
 )
 
 type PagerRequest struct {
-	Index      string                 `json:"index"`
-	Size       int                    `json:"size"`
-	Filters    map[string]interface{} `json:"filters"`   // 筛选结构
-	SortTime   string                 `json:"sort_time"` // 排序结构
-	Direction  PageDirection          `json:"direction"`
-	AfterValue []interface{}          `json:"after_value"` // 只有 Next 和 Prev 需要
+	Index      string                   `json:"index"`
+	Size       int                      `json:"size"`
+	Filters    map[string]interface{}   `json:"filters"` // 筛选结构
+	Sort       []map[string]interface{} `json:"sort"`    // 排序结构
+	Direction  PageDirection            `json:"direction"`
+	AfterValue []interface{}            `json:"after_value"` // 只有 Next 和 Prev 需要
 
 }
 
@@ -42,20 +42,17 @@ type PagerResponse struct {
 func QueryFlow(ctx context.Context, req PagerRequest) (*PagerResponse, error) {
 	// 1. 确定排序方向
 	// 默认业务逻辑是倒序（最新在最前）
-	mainOrder := "desc"
-	if req.Direction == PagePrev || req.Direction == PageLast {
-		mainOrder = "asc"
-	}
+	// mainOrder := "desc"
+	// if req.Direction == PagePrev || req.Direction == PageLast {
+	// 	mainOrder = "asc"
+	// }
 
 	// 2. 构建 Search Body
 	query := map[string]interface{}{
 		"size":             req.Size,
 		"track_total_hits": true, // 获取总数
 		"query":            req.Filters,
-		"sort": []map[string]interface{}{
-			{req.SortTime: mainOrder},
-			{"_id": mainOrder}, // 必须加 _id 保证排序唯一
-		},
+		"sort":             req.Sort,
 	}
 
 	// 3. 处理 search_after
