@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
@@ -49,11 +50,21 @@ func TestSolParser_ParseTransferEvent(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	tt := NewTransferTracker("")
 	for i, d := range z {
-		t.Logf("Swap Event %d %d:\n", i, d.EventIndex)
-		t.Logf("  Sender: %s\n", d.Token.From)
-		t.Logf("  Receiver: %s\n", d.Token.To)
+		t.Logf("Transfer Event %d %d:\n", i, d.EventIndex)
+		t.Logf("  From:%s\n", d.Token.From)
+		t.Logf("  To:%s\n", d.Token.To)
 		t.Logf("  In Token: %s Amount: %s\n", d.Token.Code, d.Token.Amount)
+		amount, _ := new(big.Int).SetString(d.Token.Amount, 10)
+		tt.AddTransfer(d.Token.From, d.Token.To, d.Token.Code, amount)
+	}
+	for _, account := range tt.GetAllAccounts() {
+		for _, token := range tt.GetAllTokens() {
+			t.Logf("Account: %s Token: %s\n", account, token)
+			t.Logf("  Net Balance: %s\n", tt.GetNetBalance(account, token))
+
+		}
 	}
 
 }

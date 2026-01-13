@@ -2,7 +2,6 @@ package parser
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -152,28 +151,12 @@ func (s *SolParser) extractInstructions(
 		return nil, nil
 	}
 
-	if ctx.innerInst == nil {
-		if len(tx.Meta.InnerInstructions) == 0 {
-			return nil, errors.New("no inner instructions found for transfer")
-		}
-		for _, inst := range tx.Meta.InnerInstructions {
-			if int(inst.Index) == ctx.index && len(inst.Instructions) >= 2 {
-				if (!IsTokenProgramId(inst.Instructions[0].ProgramId) || !IsTokenProgramId(inst.Instructions[1].ProgramId)) &&
-					(!IsTokenProgramId(inst.Instructions[0].ProgramId) || !IsSystemProgrmId(inst.Instructions[1].ProgramId)) {
-					continue
-				}
-
-				transInst := &TransferInstructions{
-					transferIx: ctx.instruction,
-				}
-
-				return transInst, nil
-			}
-		}
-		return nil, errors.New("no inner instructions found for swap")
+	transInst := &TransferInstructions{
+		transferIx: ctx.instruction,
 	}
 
-	return nil, nil
+	return transInst, nil
+
 }
 
 // Get inner instructions context

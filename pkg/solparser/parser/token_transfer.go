@@ -45,7 +45,20 @@ type CloseAccount struct {
 }
 
 func (s *SolParser) ParseTokenTransferEvent(tx *rpc.ParsedInstruction) (*types2.TransferEvent, error) {
-	event := &types2.TransferEvent{}
+	tokenTransfer, err := s.ParseTokenTransfer(tx)
+	if err != nil {
+		return nil, err
+	}
+	if tokenTransfer == nil {
+		return nil, nil
+	}
+	event := &types2.TransferEvent{
+		Token: types2.TokenAmt{
+			From:   tokenTransfer.Info.Source,
+			To:     tokenTransfer.Info.Destination,
+			Amount: tokenTransfer.Info.Amount,
+		},
+	}
 
 	return event, nil
 }

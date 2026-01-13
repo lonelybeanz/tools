@@ -33,7 +33,41 @@ type CreateAccount struct {
 }
 
 func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2.TransferEvent, error) {
-	event := &types2.TransferEvent{}
+
+	if tx.ProgramId != solana.SystemProgramID {
+		return nil, errors.New("not a system transfer")
+	}
+
+	byteMsg, err := s.parseInstruction(tx)
+	if err != nil {
+		return nil, fmt.Errorf("parsing instruction: %w", err)
+	}
+	msgStr := string(byteMsg)
+	transfer := &SystemTransfer{}
+	if strings.Contains(msgStr, "createAccount") {
+		createAccount := &CreateAccount{}
+		if err := json.Unmarshal(byteMsg, createAccount); err != nil {
+			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
+		}
+		transfer.Info.Destination = createAccount.Info.NewAccount
+		transfer.Info.Source = createAccount.Info.Source
+		transfer.Info.Lamports = createAccount.Info.Lamports
+		transfer.Type = "createAccount"
+	} else if strings.Contains(msgStr, "transfer") {
+		if err := json.Unmarshal(byteMsg, transfer); err != nil {
+			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
+		}
+	} else {
+		return nil, errors.New("not a system transfer")
+	}
+	event := &types2.TransferEvent{
+		Token: types2.TokenAmt{
+			From:   transfer.Info.Source,
+			To:     transfer.Info.Destination,
+			Amount: fmt.Sprintf("%d", transfer.Info.Lamports),
+			Code:   "So11111111111111111111111111111111111111111",
+		},
+	}
 
 	return event, nil
 }
