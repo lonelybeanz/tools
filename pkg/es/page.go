@@ -134,6 +134,7 @@ func QueryStream(ctx context.Context, req StreamRequest) (*StreamResponse, error
 			Hits  []struct {
 				Source interface{}   `json:"_source"`
 				Sort   []interface{} `json:"sort"`
+				Id     string        `json:"_id"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
@@ -169,6 +170,7 @@ func QueryStream(ctx context.Context, req StreamRequest) (*StreamResponse, error
 	}
 
 	for _, h := range hits {
+		h.Source.(map[string]interface{})["_id"] = h.Id
 		resp.List = append(resp.List, h.Source)
 	}
 	resp.StartSort = hits[0].Sort
