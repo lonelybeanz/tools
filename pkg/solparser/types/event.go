@@ -19,5 +19,6 @@ type SwapTransactionEvent struct {
 
 type TransferEvent struct {
 	EventIndex int      `json:"eventIndex"`
+	Type       string   `json:"type"`
 	Token      TokenAmt `json:"token"`
 }

@@ -3,11 +3,11 @@ package parser
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"math/big"
 	"time"
-	"bytes"
 
-	"github.com/allegro/bigcache/v3"
 	"github.com/lonelybeanz/tools/pkg/solparser/consts"
 	"github.com/lonelybeanz/tools/pkg/solparser/types"
 
@@ -38,19 +38,23 @@ type InstructionContext struct {
 	eventIndexIdentifier int
 }
 
-type SolParser struct {
-	cli   *rpc.Client
-	cache *bigcache.BigCache
+type TokenAccountInfo struct {
+	Mint  string `json:"mint"`
+	Owner string `json:"owner"`
 }
 
-func NewSolParser(cli *rpc.Client) *SolParser {
-	config := bigcache.DefaultConfig(10 * time.Minute) // 10分钟过期
-	config.CleanWindow = 5 * time.Minute               // 5分钟清理一次
-	cache, _ := bigcache.New(context.Background(), config)
+type SolParser struct {
+	cli               *rpc.Client
+	tokenAccountCache map[string]TokenAccountInfo
+}
 
+func NewSolParser(cli *rpc.Client, cache map[string]TokenAccountInfo) *SolParser {
+	if cache == nil {
+		cache = make(map[string]TokenAccountInfo)
+	}
 	return &SolParser{
-		cli:   cli,
-		cache: cache,
+		cli:               cli,
+		tokenAccountCache: cache,
 	}
 }
 
@@ -76,6 +80,58 @@ func (s *SolParser) ParseTransferEvent(parsedTransaction *rpc.GetParsedTransacti
 
 	innerEvents := s.processInstructions(parsedTransaction, s.getInnerInstructions)
 	events = append(events, innerEvents...)
+
+	for _, event := range events {
+		// Fill token amounts
+		if err := s.fillTokenAmounts(event); err != nil {
+			return nil, fmt.Errorf("filling in token amount: %w", err)
+		}
+		sourcePk, errSource := solana.PublicKeyFromBase58(event.Token.From)
+		destPk, errDest := solana.PublicKeyFromBase58(event.Token.To)
+
+		// 检查这是否是一次“包装”操作：一个所有者将SOL转入其自身的WSOL ATA
+		if errSource == nil && errDest == nil && IsATA(sourcePk, solana.WrappedSol, destPk) && event.Type == "transferAta" {
+			events = append(events, &types.TransferEvent{
+				EventIndex: event.EventIndex,
+				Type:       "wrap",
+				Token: types.TokenAmt{
+					From:   destPk.String(), // 系统程序
+					Code:   solana.WrappedSol.String(),
+					Amount: event.Token.Amount,
+					To:     sourcePk.String(),
+				},
+			}) // 接收WSOL的所有者
+		}
+	}
+
+	tt := NewTransferTracker("")
+	//处理WSOL关闭账户，将WSOl账户余额+租金费 为关闭账户的转账
+	for _, event := range events {
+		amount, _ := new(big.Int).SetString(event.Token.Amount, 10)
+		tt.AddTransfer(event.Token.From, event.Token.To, event.Token.Code, amount)
+	}
+
+	for _, event := range events {
+		if event.Type == "closeAccount" {
+			net := tt.GetNetBalance(event.Token.To, solana.WrappedSol.String())
+			rentFee, _ := new(big.Int).SetString(event.Token.Amount, 10)
+			all := new(big.Int).Add(net, rentFee)
+			event.Token.Amount = all.String()
+			event.Token.Code = consts.SOL
+
+			events = append(events, &types.TransferEvent{
+				EventIndex: event.EventIndex,
+				Type:       "closeAccount2",
+				Token: types.TokenAmt{
+					From:   event.Token.To,
+					Code:   solana.WrappedSol.String(),
+					Amount: net.String(),
+					To:     event.Token.From,
+				},
+			})
+		}
+	}
+
 	return events, nil
 }
 
@@ -127,11 +183,6 @@ func (s *SolParser) ParseInstructionIntoTransferEvent(parsedTransaction *rpc.Get
 	event, err := parseFunc(transferIx)
 	if err != nil || event == nil {
 		return nil, fmt.Errorf("parsing swap event: %w", err)
-	}
-
-	// Fill token amounts
-	if err := s.fillTokenAmounts(event, transferIx); err != nil {
-		return event, err
 	}
 
 	// Set base fields
@@ -198,35 +249,55 @@ func (s *SolParser) getInnerInstructions(tx *rpc.GetParsedTransactionResult) []I
 }
 
 // Helper function to fill token amounts
-func (s *SolParser) fillTokenAmounts(transEvent *types.TransferEvent, transferIx *rpc.ParsedInstruction) error {
-	var err error
-	if transEvent.Token, err = s.FillTokenAmtWithTransferIx(transEvent.Token, transferIx); err != nil {
+func (s *SolParser) fillTokenAmounts(transEvent *types.TransferEvent) error {
+	if err := s.FillTokenAmtWithTransferIx(transEvent); err != nil {
 		return fmt.Errorf("filling in token amount: %w", err)
 	}
-
 	return nil
 }
 
-func (s *SolParser) FillTokenAmtWithTransferIx(tkAmt types.TokenAmt, ix *rpc.ParsedInstruction) (types.TokenAmt, error) {
-	transfer, err := s.ParseTransfer(ix)
-	if err != nil {
-		return tkAmt, err
-	}
-	tkAmt.Amount = transfer.Info.Amount
+func (s *SolParser) FillTokenAmtWithTransferIx(transEvent *types.TransferEvent) error {
 
-	var mintAddress string // token mint address
-	var tokenInfo *token.TokenAccount
-	if tokenInfo, err = s.RetryGetTokenAccountInfoByTokenAccount(transfer.Info.Destination); err == nil && tokenInfo != nil {
-		mintAddress = tokenInfo.Mint.String()
-		tkAmt.To = tokenInfo.Owner.String()
-	} else if tokenInfo, err = s.RetryGetTokenAccountInfoByTokenAccount(transfer.Info.Source); err == nil && tokenInfo != nil {
-		mintAddress = tokenInfo.Mint.String()
-		tkAmt.From = tokenInfo.Owner.String()
-	} else {
-		return tkAmt, err
+	// 遵循以“所有者”为中心的模型来追踪资金流动
+
+	// 场景1: Token Program (e.g. SPL Token, WSOL)
+	// 对于SPL代币转账，我们将ATA地址解析为其所有者地址。
+	if transEvent.Type == "tokenTransfer" {
+		sourceInfo, _ := s.RetryGetTokenAccountInfoByTokenAccount(transEvent.Token.From)
+		destInfo, _ := s.RetryGetTokenAccountInfoByTokenAccount(transEvent.Token.To)
+
+		if sourceInfo != nil {
+			transEvent.Token.From = sourceInfo.Owner.String()
+			transEvent.Token.Code = sourceInfo.Mint.String()
+		}
+
+		if destInfo != nil {
+			transEvent.Token.To = destInfo.Owner.String()
+			if transEvent.Token.Code == "" { // 如果无法从源头确定代币，则从目标确定
+				transEvent.Token.Code = destInfo.Mint.String()
+			}
+		}
+		return nil
 	}
-	tkAmt.Code = mintAddress
-	return tkAmt, nil
+
+	// 场景2: System Program (普通SOL转账 或 SOL -> WSOL包装)
+	if transEvent.Type == "systemTransfer" {
+		sourcePk, errSource := solana.PublicKeyFromBase58(transEvent.Token.From)
+		destPk, errDest := solana.PublicKeyFromBase58(transEvent.Token.To)
+
+		// 检查这是否是一次“包装”操作：一个所有者将SOL转入其自身的WSOL ATA
+		if errSource == nil && errDest == nil && IsATA(sourcePk, solana.WrappedSol, destPk) {
+			// 这是Wrap操作。我们将其建模为所有者收到了WSOL。
+			transEvent.Token.Code = consts.SOL
+			transEvent.Token.From = sourcePk.String() // 虚拟来源，表示“铸造”
+			transEvent.Token.To = destPk.String()     // 接收WSOL的所有者
+			transEvent.Type = "transferAta"
+		}
+		// 如果不是Wrap操作，那么它就是一笔普通的SOL转账，原始的tkAmt是正确的。
+		return nil
+	}
+
+	return nil
 }
 
 func (s *SolParser) RetryGetTokenAccountInfoByTokenAccount(tokenAccount string) (*token.TokenAccount, error) {
@@ -246,26 +317,19 @@ func (s *SolParser) RetryGetTokenAccountInfoByTokenAccount(tokenAccount string) 
 }
 
 func (s *SolParser) GetTokenAccountInfoByTokenAccount(tokenAccount string) (*token.TokenAccount, error) {
-	cacheBytes, err := s.cache.Get(tokenAccount)
-	if err == nil {
-		if bytes.Equal(cacheBytes, []byte{}) {
-			return nil, nil
+	if s.tokenAccountCache != nil {
+		if tokenAccountInfo, ok := s.tokenAccountCache[tokenAccount]; ok {
+			t := &token.TokenAccount{
+				Mint:  common.PublicKeyFromString(tokenAccountInfo.Mint),
+				Owner: common.PublicKeyFromString(tokenAccountInfo.Owner),
+			}
+			return t, nil
 		}
-		// 从缓存获取的是[]byte类型，需要解析成TokenAccount
-		t, err2 := token.TokenAccountFromData(cacheBytes)
-		if err2 != nil {
-			return nil, fmt.Errorf("error decoding cached token account data: %v", err2)
-		}
-		return &t, nil
 	}
 
 	ctx := context.Background()
 	accountInfo, e := s.cli.GetAccountInfo(ctx, solana.MustPublicKeyFromBase58(tokenAccount))
 	if e != nil {
-		if e.Error() == "not found" {
-			s.cache.Set(tokenAccount, []byte{})
-			return nil, nil
-		}
 		return nil, e
 	}
 	if accountInfo.Value != nil && accountInfo.Value.Owner == solana.SystemProgramID {
@@ -281,17 +345,12 @@ func (s *SolParser) GetTokenAccountInfoByTokenAccount(tokenAccount string) (*tok
 			DelegatedAmount: 0,
 			CloseAuthority:  nil,
 		}
-		// 缓存这个SOL账户信息
-		serializedData := s.SerializeTokenAccount(t)
-		s.cache.Set(tokenAccount, serializedData)
 		return t, nil
 	}
 	t, err2 := token.TokenAccountFromData(accountInfo.GetBinary())
 	if err2 != nil {
 		return nil, fmt.Errorf("error decoding token account data: %v", err2)
 	}
-	// 将获取到的数据以[]byte形式存入缓存
-	s.cache.Set(tokenAccount, accountInfo.GetBinary())
 	return &t, nil
 }
 
@@ -339,4 +398,19 @@ func (s *SolParser) SerializeTokenAccount(acc *token.TokenAccount) []byte {
 	}
 
 	return data
+}
+
+func (s *SolParser) parseInstruction(ix *rpc.ParsedInstruction) ([]byte, error) {
+	if ix == nil {
+		return nil, errors.New("parsed instruction is nil")
+	}
+
+	if ix.Parsed == nil && len(ix.Data) == 0 {
+		return nil, errors.New("instruction has no parseable data")
+	}
+
+	if ix.Data == nil {
+		return ix.Parsed.MarshalJSON()
+	}
+	return ix.Data, nil
 }

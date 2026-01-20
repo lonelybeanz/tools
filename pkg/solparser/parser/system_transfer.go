@@ -54,13 +54,16 @@ func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2
 		transfer.Info.Source = createAccount.Info.Source
 		transfer.Info.Lamports = createAccount.Info.Lamports
 		transfer.Type = "createAccount"
+		
 	} else if strings.Contains(msgStr, "transfer") {
 		if err := json.Unmarshal(byteMsg, transfer); err != nil {
 			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
 		}
+		transfer.Type = "systemTransfer"
 	} else {
 		return nil, errors.New("not a system transfer")
 	}
+
 	event := &types2.TransferEvent{
 		Token: types2.TokenAmt{
 			From:   transfer.Info.Source,
@@ -68,38 +71,8 @@ func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2
 			Amount: fmt.Sprintf("%d", transfer.Info.Lamports),
 			Code:   consts.SOL,
 		},
+		Type: transfer.Type,
 	}
 
 	return event, nil
-}
-
-func (s *SolParser) ParseSystemTransfer(ix *rpc.ParsedInstruction) (*SystemTransfer, error) {
-	if ix.ProgramId != solana.SystemProgramID {
-		return nil, errors.New("not a system transfer")
-	}
-
-	byteMsg, err := s.parseInstruction(ix)
-	if err != nil {
-		return nil, fmt.Errorf("parsing instruction: %w", err)
-	}
-	msgStr := string(byteMsg)
-	transfer := &SystemTransfer{}
-	if strings.Contains(msgStr, "createAccount") {
-		createAccount := &CreateAccount{}
-		if err := json.Unmarshal(byteMsg, createAccount); err != nil {
-			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
-		}
-		transfer.Info.Destination = createAccount.Info.NewAccount
-		transfer.Info.Source = createAccount.Info.Source
-		transfer.Info.Lamports = createAccount.Info.Lamports
-		transfer.Type = "createAccount"
-	} else if strings.Contains(msgStr, "transfer") {
-		if err := json.Unmarshal(byteMsg, transfer); err != nil {
-			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
-		}
-	} else {
-		return nil, errors.New("not a system transfer")
-	}
-
-	return transfer, nil
 }

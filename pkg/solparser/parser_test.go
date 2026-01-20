@@ -17,7 +17,7 @@ func TestParseSwapEvent(t *testing.T) {
 	uint64One := uint64(1)
 
 	// Create parser instance
-	p := parser.NewSolParser(client)
+	p := parser.NewSolParser(client, nil)
 
 	// Transaction signature to parse
 	sig := solana.MustSignatureFromBase58("gkkuKB6uMXgePdbWkwxpMA6c3as5PzPErwBpNweYjWZsa521TvepmV73foYWbDnVd8jJYpMqPEUseyFEZvBHQYC")

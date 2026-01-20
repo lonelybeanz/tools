@@ -32,7 +32,7 @@ func Before(t *testing.T) {
 	// 		CustomHeaders: map[string]string{},
 	// 	},
 	// ))
-	testParser = NewSolParser(testRpc)
+	testParser = NewSolParser(testRpc, nil)
 }
 
 func TestSolParser_ParseTransferEvent(t *testing.T) {
@@ -81,5 +81,17 @@ func TestSolParser_ParseTransferEvent(t *testing.T) {
 	fmt.Println(dotGraph)
 	fmt.Println("--- End of Graph ---")
 	fmt.Println("\n提示: 复制以上DOT格式的文本并粘贴到Graphviz在线渲染工具中（如: https://dreampuf.github.io/GraphvizOnline/）即可查看可视化流转图。")
+
+	for _, vv := range tt.GetAllAccounts() {
+		fmt.Println("Address:", vv)
+		for _, v := range tt.GetAllTokens() {
+			net := tt.GetNetBalance(vv, v)
+			if net.Cmp(big.NewInt(0)) == 0 {
+				continue
+			}
+			fmt.Println("  Token:", v, "change:", net.String())
+		}
+		fmt.Println("------------------------------------------")
+	}
 
 }

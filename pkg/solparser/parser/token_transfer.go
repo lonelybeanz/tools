@@ -44,6 +44,15 @@ type CloseAccount struct {
 	Type string `json:"type"`
 }
 
+type InitializeAccount3 struct {
+	Info struct {
+		Mint    string `json:"mint"`
+		Owner   string `json:"owner"`
+		Account string `json:"account"`
+	} `json:"info"`
+	Type string `json:"type"`
+}
+
 func (s *SolParser) ParseTokenTransferEvent(tx *rpc.ParsedInstruction) (*types2.TransferEvent, error) {
 	tokenTransfer, err := s.ParseTokenTransfer(tx)
 	if err != nil {
@@ -53,6 +62,7 @@ func (s *SolParser) ParseTokenTransferEvent(tx *rpc.ParsedInstruction) (*types2.
 		return nil, nil
 	}
 	event := &types2.TransferEvent{
+		Type: tokenTransfer.InstructionType,
 		Token: types2.TokenAmt{
 			From:   tokenTransfer.Info.Source,
 			To:     tokenTransfer.Info.Destination,
@@ -70,7 +80,22 @@ func (s *SolParser) ParseTokenTransfer(ix *rpc.ParsedInstruction) (*TokenTransfe
 	}
 
 	msgStr := string(byteMsg)
+
+	var instructionType string
 	if strings.Contains(msgStr, "transferChecked") {
+		instructionType = "transferChecked"
+	} else if strings.Contains(msgStr, "transfer") {
+		instructionType = "transfer"
+	} else if strings.Contains(msgStr, "closeAccount") {
+		instructionType = "closeAccount"
+	} else if strings.Contains(msgStr, "initializeAccount3") {
+		instructionType = "initializeAccount3"
+	} else {
+		return nil, fmt.Errorf("not a valid transfer instruction %s", ix.ProgramId.String())
+	}
+
+	switch instructionType {
+	case "transferChecked":
 		transfer1 := &TokenTransferChecked{}
 		if err := json.Unmarshal(byteMsg, transfer1); err != nil {
 			return nil, fmt.Errorf("unmarshaling checked transfer: %w", err)
@@ -87,14 +112,16 @@ func (s *SolParser) ParseTokenTransfer(ix *rpc.ParsedInstruction) (*TokenTransfe
 				Destination: transfer1.Info.Destination,
 				Source:      transfer1.Info.Source,
 			},
+			InstructionType: "tokenTransfer",
 		}, nil
-	} else if strings.Contains(msgStr, "transfer") {
+	case "transfer":
 		transfer := &TokenTransfer{}
 		if err := json.Unmarshal(byteMsg, transfer); err != nil {
 			return nil, fmt.Errorf("unmarshaling transfer: %w", err)
 		}
+		transfer.InstructionType = "tokenTransfer"
 		return transfer, nil
-	} else if strings.Contains(msgStr, "closeAccount") {
+	case "closeAccount":
 		closeAccount := &CloseAccount{}
 		if err := json.Unmarshal(byteMsg, closeAccount); err != nil {
 			return nil, fmt.Errorf("unmarshaling close account: %w", err)
@@ -113,7 +140,17 @@ func (s *SolParser) ParseTokenTransfer(ix *rpc.ParsedInstruction) (*TokenTransfe
 			},
 			InstructionType: "closeAccount",
 		}, nil
+	case "initializeAccount3":
+		initializeAccount3 := &InitializeAccount3{}
+		if err := json.Unmarshal(byteMsg, initializeAccount3); err != nil {
+			return nil, fmt.Errorf("unmarshaling initialize account: %w", err)
+		}
+		s.tokenAccountCache[initializeAccount3.Info.Account] = TokenAccountInfo{
+			Mint:  initializeAccount3.Info.Mint,
+			Owner: initializeAccount3.Info.Owner,
+		}
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("not a valid transfer instruction %s", ix.ProgramId.String())
 	}
-
-	return nil, fmt.Errorf("not a valid transfer instruction %s", ix.ProgramId.String())
 }

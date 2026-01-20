@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/gagliardetto/solana-go"
+	associatedtokenaccount "github.com/gagliardetto/solana-go/programs/associated-token-account"
+	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
 )
 
@@ -44,4 +46,16 @@ func IsTokenProgramId(program solana.PublicKey) bool {
 
 func IsSystemProgrmId(program solana.PublicKey) bool {
 	return program == solana.SystemProgramID
+}
+
+func IsATA(ownerAddress, mintAddress, tokenAccountAddress solana.PublicKey) bool {
+	associatedTokenAddress, _, err := solana.FindProgramAddress(
+		[][]byte{
+			ownerAddress.Bytes(),
+			token.ProgramID.Bytes(),
+			mintAddress.Bytes(),
+		},
+		associatedtokenaccount.ProgramID,
+	)
+	return err == nil && associatedTokenAddress == tokenAccountAddress
 }
