@@ -2,9 +2,13 @@ package parser
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"time"
+	"bytes"
 
+	"github.com/allegro/bigcache/v3"
+	"github.com/lonelybeanz/tools/pkg/solparser/consts"
 	"github.com/lonelybeanz/tools/pkg/solparser/types"
 
 	"github.com/avast/retry-go"
@@ -35,11 +39,19 @@ type InstructionContext struct {
 }
 
 type SolParser struct {
-	cli *rpc.Client
+	cli   *rpc.Client
+	cache *bigcache.BigCache
 }
 
 func NewSolParser(cli *rpc.Client) *SolParser {
-	return &SolParser{cli: cli}
+	config := bigcache.DefaultConfig(10 * time.Minute) // 10分钟过期
+	config.CleanWindow = 5 * time.Minute               // 5分钟清理一次
+	cache, _ := bigcache.New(context.Background(), config)
+
+	return &SolParser{
+		cli:   cli,
+		cache: cache,
+	}
 }
 
 func (s *SolParser) GetParseFuncByProgramId(programId string) (func(*rpc.ParsedInstruction) (*types.TransferEvent, error), bool) {
@@ -234,16 +246,33 @@ func (s *SolParser) RetryGetTokenAccountInfoByTokenAccount(tokenAccount string) 
 }
 
 func (s *SolParser) GetTokenAccountInfoByTokenAccount(tokenAccount string) (*token.TokenAccount, error) {
+	cacheBytes, err := s.cache.Get(tokenAccount)
+	if err == nil {
+		if bytes.Equal(cacheBytes, []byte{}) {
+			return nil, nil
+		}
+		// 从缓存获取的是[]byte类型，需要解析成TokenAccount
+		t, err2 := token.TokenAccountFromData(cacheBytes)
+		if err2 != nil {
+			return nil, fmt.Errorf("error decoding cached token account data: %v", err2)
+		}
+		return &t, nil
+	}
+
 	ctx := context.Background()
 	accountInfo, e := s.cli.GetAccountInfo(ctx, solana.MustPublicKeyFromBase58(tokenAccount))
 	if e != nil {
+		if e.Error() == "not found" {
+			s.cache.Set(tokenAccount, []byte{})
+			return nil, nil
+		}
 		return nil, e
 	}
 	if accountInfo.Value != nil && accountInfo.Value.Owner == solana.SystemProgramID {
 		uint64One := uint64(1)
 		// 账户本身就是一个 lamport 账户，非Token账户
 		t := &token.TokenAccount{
-			Mint:            common.PublicKey(solana.SolMint),
+			Mint:            common.PublicKeyFromString(consts.SOL),
 			Owner:           common.PublicKeyFromString(tokenAccount),
 			Amount:          accountInfo.Value.Lamports,
 			Delegate:        nil,
@@ -252,11 +281,62 @@ func (s *SolParser) GetTokenAccountInfoByTokenAccount(tokenAccount string) (*tok
 			DelegatedAmount: 0,
 			CloseAuthority:  nil,
 		}
+		// 缓存这个SOL账户信息
+		serializedData := s.SerializeTokenAccount(t)
+		s.cache.Set(tokenAccount, serializedData)
 		return t, nil
 	}
 	t, err2 := token.TokenAccountFromData(accountInfo.GetBinary())
 	if err2 != nil {
 		return nil, fmt.Errorf("error decoding token account data: %v", err2)
 	}
+	// 将获取到的数据以[]byte形式存入缓存
+	s.cache.Set(tokenAccount, accountInfo.GetBinary())
 	return &t, nil
+}
+
+// SerializeTokenAccount 将TokenAccount序列化为[]byte
+func (s *SolParser) SerializeTokenAccount(acc *token.TokenAccount) []byte {
+	data := make([]byte, 165) // TokenAccount固定大小为165字节
+
+	// 写入Mint地址 (32字节)
+	copy(data[0:32], acc.Mint.Bytes())
+
+	// 写入Owner地址 (32字节)
+	copy(data[32:64], acc.Owner.Bytes())
+
+	// 写入Amount (8字节)
+	binary.LittleEndian.PutUint64(data[64:72], acc.Amount)
+
+	// 写入Delegate (4字节标志 + 32字节地址)
+	if acc.Delegate != nil {
+		copy(data[72:76], []byte{1, 0, 0, 0}) // Some标记
+		copy(data[76:108], acc.Delegate.Bytes())
+	} else {
+		copy(data[72:76], []byte{0, 0, 0, 0}) // None标记
+	}
+
+	// 写入State (1字节)
+	data[108] = byte(acc.State)
+
+	// 写入IsNative (4字节标志 + 8字节数值)
+	if acc.IsNative != nil {
+		copy(data[109:113], []byte{1, 0, 0, 0}) // Some标记
+		binary.LittleEndian.PutUint64(data[113:121], *acc.IsNative)
+	} else {
+		copy(data[109:113], []byte{0, 0, 0, 0}) // None标记
+	}
+
+	// 写入DelegatedAmount (8字节)
+	binary.LittleEndian.PutUint64(data[121:129], acc.DelegatedAmount)
+
+	// 写入CloseAuthority (4字节标志 + 32字节地址)
+	if acc.CloseAuthority != nil {
+		copy(data[129:133], []byte{1, 0, 0, 0}) // Some标记
+		copy(data[133:165], acc.CloseAuthority.Bytes())
+	} else {
+		copy(data[129:133], []byte{0, 0, 0, 0}) // None标记
+	}
+
+	return data
 }

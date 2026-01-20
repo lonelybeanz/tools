@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -31,7 +32,7 @@ func Before(t *testing.T) {
 	// 		CustomHeaders: map[string]string{},
 	// 	},
 	// ))
-	testParser = &SolParser{cli: testRpc}
+	testParser = NewSolParser(testRpc)
 }
 
 func TestSolParser_ParseTransferEvent(t *testing.T) {
@@ -41,7 +42,7 @@ func TestSolParser_ParseTransferEvent(t *testing.T) {
 	ctx := context.Background()
 	opts := &rpc.GetParsedTransactionOpts{MaxSupportedTransactionVersion: intPtr,
 		Commitment: rpc.CommitmentConfirmed}
-	sig := solana.MustSignatureFromBase58("531Di8ronp8z6aCjAGbw3vFcfJsja222jj5zNHtauH4eymXuN1hQLNaAQMaewf4GmL9f3JznEz3PaEA7G4TD7EzX")
+	sig := solana.MustSignatureFromBase58("RbhumT4HTnMG2kLR5vbx9LvVYxtoqZAY3fRxxL8cyEoPjt3vWdkuSwfCEDUnTm4BtuiWMwdJbZ8oEWkq8pBcX3i")
 	p, err := testRpc.GetParsedTransaction(ctx, sig, opts)
 	if err != nil {
 		t.Error(err)
@@ -66,5 +67,19 @@ func TestSolParser_ParseTransferEvent(t *testing.T) {
 
 		}
 	}
+
+	// --- Generate and print flow diagram ---
+	tokenDetails := map[string]*TokenInfo{
+		"So11111111111111111111111111111111111111111": {Symbol: "SOL", Decimal: 9},
+		"So11111111111111111111111111111111111111112": {Symbol: "WSOL", Decimal: 9},
+		// Add other known tokens like USDC, USDT for Solana
+		"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": {Symbol: "USDC", Decimal: 6},
+	}
+
+	dotGraph := tt.ToDOT(tokenDetails)
+	fmt.Println("\n--- Transfer Graph (DOT format) ---")
+	fmt.Println(dotGraph)
+	fmt.Println("--- End of Graph ---")
+	fmt.Println("\n提示: 复制以上DOT格式的文本并粘贴到Graphviz在线渲染工具中（如: https://dreampuf.github.io/GraphvizOnline/）即可查看可视化流转图。")
 
 }

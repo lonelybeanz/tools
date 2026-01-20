@@ -8,6 +8,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/lonelybeanz/tools/pkg/solparser/consts"
 	types2 "github.com/lonelybeanz/tools/pkg/solparser/types"
 )
 
@@ -65,7 +66,7 @@ func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2
 			From:   transfer.Info.Source,
 			To:     transfer.Info.Destination,
 			Amount: fmt.Sprintf("%d", transfer.Info.Lamports),
-			Code:   "So11111111111111111111111111111111111111111",
+			Code:   consts.SOL,
 		},
 	}
 

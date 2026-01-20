@@ -17,7 +17,7 @@ func TestParseTxLogs(t *testing.T) {
 	if err != nil {
 		t.Log(err)
 	}
-	txHash := "0xf6a17ef264df100099f74c5b209eb2e5d2a5324f8148ccffa814442fd33f5bf3"
+	txHash := "0xc54d1c314aa964c012d25dadbcc1c49fb5702b0aab2625c1f70abd2af137a260"
 	// 获取交易回执
 	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
 	if err != nil {
@@ -59,4 +59,79 @@ func TestParseTxLogs(t *testing.T) {
 		fmt.Println("------------------------------------------")
 	}
 
+	// --- Generate and print flow diagram ---
+	tokenDetails := make(map[common.Address]*TokenPrice)
+	allTokens := transferTracker.GetAllTokens()
+	// A simple way to populate some known tokens.
+	// For a real application, you might have a more robust way to get token info.
+	knownTokens := map[common.Address]*TokenPrice{
+		BNB.Address:  &BNB,
+		WBNB.Address: &WBNB,
+		USDT.Address: &USDT,
+		USDC.Address: &USDC,
+	}
+	for _, tokenAddr := range allTokens {
+		if details, ok := knownTokens[tokenAddr]; ok {
+			tokenDetails[tokenAddr] = details
+		}
+	}
+
+	fmt.Println("\n--- Finding Original Sources ---")
+	for _, account := range transferTracker.GetAllAccounts() {
+		for _, token := range transferTracker.GetAllTokens() {
+			// We only care about accounts that had a net positive balance
+			if transferTracker.GetNetBalance(account, token).Sign() > 0 {
+				sources := transferTracker.FindOriginalSources(account, token)
+
+				// For cleaner output, let's get token symbol
+				var tokenSymbol string
+				if details, ok := tokenDetails[token]; ok {
+					tokenSymbol = details.Symbol
+				} else {
+					tokenSymbol = token.Hex()
+				}
+
+				// Format sources for printing
+				var sourceStrs []string
+				for _, s := range sources {
+					sourceStrs = append(sourceStrs, s.Hex())
+				}
+
+				fmt.Printf("Sources for %s receiving %s: %v\n", account.Hex(), tokenSymbol, sourceStrs)
+				fmt.Println("------------------------------------------")
+				fmt.Println("\n--- Finding Final Destinations ---")
+				destinations := transferTracker.FindFinalDestinations(account, token)
+				var destStrs []string
+				for _, d := range destinations {
+					destStrs = append(destStrs, d.Hex())
+				}
+				fmt.Printf("Final Destinations for %s receiving %s: %v\n", account.Hex(), tokenSymbol, destStrs)
+				fmt.Println("------------------------------------------")
+
+			}
+		}
+	}
+
+	// --- Generate and print flow diagram ---
+	tokenDetails = make(map[common.Address]*TokenPrice)
+	allTokens = transferTracker.GetAllTokens()
+	// A simple way to populate some known tokens.
+	// For a real application, you might have a more robust way to get token info.
+	knownTokens = map[common.Address]*TokenPrice{
+		BNB.Address:  &BNB,
+		WBNB.Address: &WBNB,
+		USDT.Address: &USDT,
+		USDC.Address: &USDC,
+	}
+	for _, tokenAddr := range allTokens {
+		if details, ok := knownTokens[tokenAddr]; ok {
+			tokenDetails[tokenAddr] = details
+		}
+	}
+
+	dotGraph := transferTracker.ToDOT(tokenDetails)
+	fmt.Println("\n--- Transfer Graph (DOT format) ---")
+	fmt.Println(dotGraph)
+	fmt.Println("--- End of Graph ---")
+	fmt.Println("\n提示: 复制以上DOT格式的文本并粘贴到Graphviz在线渲染工具中（如: https://dreampuf.github.io/GraphvizOnline/）即可查看可视化流转图。")
 }

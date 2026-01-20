@@ -88,6 +88,8 @@ SkipToCheck:
 			return "Approve"
 		case "2e1a7d4d":
 			return "Withdraw"
+		case "a9059cbb":
+			return "Transfer"
 		default:
 			return "other"
 		}
