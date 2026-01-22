@@ -13,7 +13,7 @@ func TestTxFlag(t *testing.T) {
 	if err != nil {
 		t.Log(err)
 	}
-	txHash := common.HexToHash("0xc7083ac5dbfdd8a0f1ee8315ae08b59091e78a304732ac4fe3e3bd8d2d5473a5")
+	txHash := common.HexToHash("0xe68013ffc1dd79dba56c2747bb97ef32fd4e7f29c6e88eaed518720bff590a6e")
 	tx, _, err := client.TransactionByHash(context.Background(), txHash)
 	if err != nil {
 		t.Log(err)
