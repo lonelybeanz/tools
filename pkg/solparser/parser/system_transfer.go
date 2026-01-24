@@ -9,7 +9,6 @@ import (
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/lonelybeanz/tools/pkg/solparser/consts"
-	types2 "github.com/lonelybeanz/tools/pkg/solparser/types"
 )
 
 type SystemTransfer struct {
@@ -33,7 +32,7 @@ type CreateAccount struct {
 	Type string `json:"type"`
 }
 
-func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2.TransferEvent, error) {
+func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*TransferEvent, error) {
 
 	if tx.ProgramId != solana.SystemProgramID {
 		return nil, errors.New("not a system transfer")
@@ -44,35 +43,40 @@ func (s *SolParser) ParseSystemTransferEvent(tx *rpc.ParsedInstruction) (*types2
 		return nil, fmt.Errorf("parsing instruction: %w", err)
 	}
 	msgStr := string(byteMsg)
-	transfer := &SystemTransfer{}
+
 	if strings.Contains(msgStr, "createAccount") {
 		createAccount := &CreateAccount{}
 		if err := json.Unmarshal(byteMsg, createAccount); err != nil {
 			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
 		}
-		transfer.Info.Destination = createAccount.Info.NewAccount
-		transfer.Info.Source = createAccount.Info.Source
-		transfer.Info.Lamports = createAccount.Info.Lamports
-		transfer.Type = "createAccount"
-		
+
+		s.updateAccountCache(true, createAccount.Info.NewAccount, createAccount.Info.Owner, "")
+
+		return &TransferEvent{
+			Type:   "createAccount",
+			From:   createAccount.Info.Source,
+			To:     createAccount.Info.NewAccount,
+			Token:  consts.SOL,
+			Amount: fmt.Sprintf("%d", createAccount.Info.Lamports),
+		}, nil
+
 	} else if strings.Contains(msgStr, "transfer") {
+		transfer := &SystemTransfer{}
 		if err := json.Unmarshal(byteMsg, transfer); err != nil {
 			return nil, fmt.Errorf("unmarshaling system transfer: %w", err)
 		}
-		transfer.Type = "systemTransfer"
+
+		s.updateAccountCache(false, transfer.Info.Source, transfer.Info.Source, "")
+		return &TransferEvent{
+			Type:   "systemTransfer",
+			From:   transfer.Info.Source,
+			To:     transfer.Info.Destination,
+			Token:  consts.SOL,
+			Amount: fmt.Sprintf("%d", transfer.Info.Lamports),
+		}, nil
+
 	} else {
 		return nil, errors.New("not a system transfer")
 	}
 
-	event := &types2.TransferEvent{
-		Token: types2.TokenAmt{
-			From:   transfer.Info.Source,
-			To:     transfer.Info.Destination,
-			Amount: fmt.Sprintf("%d", transfer.Info.Lamports),
-			Code:   consts.SOL,
-		},
-		Type: transfer.Type,
-	}
-
-	return event, nil
 }

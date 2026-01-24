@@ -75,43 +75,6 @@ func TestParseTxLogs(t *testing.T) {
 			tokenDetails[tokenAddr] = details
 		}
 	}
-
-	fmt.Println("\n--- Finding Original Sources ---")
-	for _, account := range transferTracker.GetAllAccounts() {
-		for _, token := range transferTracker.GetAllTokens() {
-			// We only care about accounts that had a net positive balance
-			if transferTracker.GetNetBalance(account, token).Sign() > 0 {
-				sources := transferTracker.FindOriginalSources(account, token)
-
-				// For cleaner output, let's get token symbol
-				var tokenSymbol string
-				if details, ok := tokenDetails[token]; ok {
-					tokenSymbol = details.Symbol
-				} else {
-					tokenSymbol = token.Hex()
-				}
-
-				// Format sources for printing
-				var sourceStrs []string
-				for _, s := range sources {
-					sourceStrs = append(sourceStrs, s.Hex())
-				}
-
-				fmt.Printf("Sources for %s receiving %s: %v\n", account.Hex(), tokenSymbol, sourceStrs)
-				fmt.Println("------------------------------------------")
-				fmt.Println("\n--- Finding Final Destinations ---")
-				destinations := transferTracker.FindFinalDestinations(account, token)
-				var destStrs []string
-				for _, d := range destinations {
-					destStrs = append(destStrs, d.Hex())
-				}
-				fmt.Printf("Final Destinations for %s receiving %s: %v\n", account.Hex(), tokenSymbol, destStrs)
-				fmt.Println("------------------------------------------")
-
-			}
-		}
-	}
-
 	// --- Generate and print flow diagram ---
 	tokenDetails = make(map[common.Address]*TokenPrice)
 	allTokens = transferTracker.GetAllTokens()

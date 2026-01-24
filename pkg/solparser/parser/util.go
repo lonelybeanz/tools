@@ -48,7 +48,11 @@ func IsSystemProgrmId(program solana.PublicKey) bool {
 	return program == solana.SystemProgramID
 }
 
-func IsATA(ownerAddress, mintAddress, tokenAccountAddress solana.PublicKey) bool {
+func IsATA(owner, mint, tokenAccount string) bool {
+	ownerAddress, _ := solana.PublicKeyFromBase58(owner)
+	mintAddress, _ := solana.PublicKeyFromBase58(mint)
+	tokenAccountAddress, _ := solana.PublicKeyFromBase58(tokenAccount)
+
 	associatedTokenAddress, _, err := solana.FindProgramAddress(
 		[][]byte{
 			ownerAddress.Bytes(),

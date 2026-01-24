@@ -2,12 +2,6 @@ package coder
 
 import "github.com/gagliardetto/solana-go"
 
-// TODO: A better struct, maybe from anchor generated code
-
-
-
-
-
 type PumpFunAnchorSelfCPILogData struct {
 	Unused1              [16]byte         `compare:"-"`
 	Mint                 solana.PublicKey `compare:"true"`

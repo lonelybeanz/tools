@@ -47,6 +47,11 @@ func (tt *TransferTracker) AddTransfer(from, to, token common.Address, amount *b
 	log.Debugf("{%s} Added transfer:[%s] %s -> %s (%s)", tt.TxHash, token.String(), from.String(), to.String(), amount.String())
 }
 
+// GetTransfers returns all transfer records.
+func (tt *TransferTracker) GetTransfers() []*TransferRecord {
+	return tt.transfers
+}
+
 // GetIncoming 计算账户收到的特定代币总量
 func (tt *TransferTracker) GetIncoming(account, token common.Address) *big.Int {
 	total := new(big.Int)
@@ -142,6 +147,106 @@ func (tt *TransferTracker) GetTokenTransactions(token common.Address) []*Transfe
 	return transactions
 }
 
+// GetTransferCounts returns the number of incoming and outgoing transfers for a specific account and token.
+func (tt *TransferTracker) GetTransferCounts(account, token common.Address) (inCount, outCount int) {
+	for _, tx := range tt.transfers {
+		if tx.Token == token {
+			if tx.To == account {
+				inCount++
+			}
+			if tx.From == account {
+				outCount++
+			}
+		}
+	}
+	return
+}
+
+// TraceUltimateSource traces a transfer backward to find the original sender in a chain.
+// It skips over "intermediate" addresses, which are defined as addresses that, for a given token,
+// have a net balance change of zero and exactly one incoming and one outgoing transfer.
+// The trace stops at forks (multiple inputs/outputs), merges, or designated non-intermediate addresses.
+//
+// `address`: The address to start tracing back from.
+// `token`: The token being transferred.
+// `nonIntermediate`: A set of addresses (e.g., your own wallets) that are considered final sources/sinks and will stop the trace.
+func (tt *TransferTracker) TraceUltimateSource(address, token common.Address, nonIntermediate map[common.Address]bool) common.Address {
+	current := address
+	visited := make(map[common.Address]bool) // To prevent infinite loops in case of cycles
+
+	for {
+		if visited[current] {
+			return current // Cycle detected, stop here.
+		}
+		visited[current] = true
+
+		// If the current address is a designated non-intermediate address (e.g., one of our own), it's the source.
+		if nonIntermediate[current] {
+			return current
+		}
+
+		netBalance := tt.GetNetBalance(current, token)
+		inCount, outCount := tt.GetTransferCounts(current, token)
+
+		// An address is intermediate if it's a simple 1-in-1-out pass-through for the token.
+		if netBalance.Sign() == 0 && inCount == 1 && outCount == 1 {
+			// It's an intermediate node. Find the single incoming transfer to trace back.
+			var sourceFound bool
+			for _, tx := range tt.transfers {
+				if tx.To == current && tx.Token == token {
+					current = tx.From // Move to the previous address in the chain.
+					sourceFound = true
+					break
+				}
+			}
+			if !sourceFound {
+				// Should not happen if inCount is 1, but as a safeguard.
+				return current
+			}
+		} else {
+			// Not an intermediate node, so it's the source in this context.
+			return current
+		}
+	}
+}
+
+// TraceUltimateSink traces a transfer forward to find the final recipient in a chain.
+// It skips over "intermediate" addresses using the same logic as TraceUltimateSource.
+func (tt *TransferTracker) TraceUltimateSink(address, token common.Address, nonIntermediate map[common.Address]bool) common.Address {
+	current := address
+	visited := make(map[common.Address]bool) // To prevent infinite loops
+
+	for {
+		if visited[current] {
+			return current // Cycle detected, stop here.
+		}
+		visited[current] = true
+
+		if nonIntermediate[current] {
+			return current
+		}
+
+		netBalance := tt.GetNetBalance(current, token)
+		inCount, outCount := tt.GetTransferCounts(current, token)
+
+		if netBalance.Sign() == 0 && inCount == 1 && outCount == 1 {
+			var sinkFound bool
+			for _, tx := range tt.transfers {
+				if tx.From == current && tx.Token == token {
+					current = tx.To // Move to the next address in the chain.
+					sinkFound = true
+					break
+				}
+			}
+			if !sinkFound {
+				return current
+			}
+		} else {
+			return current
+		}
+	}
+}
+
 // GetNetBalance 计算账户特定代币的净余额（收到 - 转出）
 func (tt *TransferTracker) GetNetBalance(account, token common.Address) *big.Int {
 	incoming := tt.GetIncoming(account, token)
@@ -180,142 +285,13 @@ func (tt *TransferTracker) GetTransactionsByToken(token common.Address) []*Trans
 	return records
 }
 
-// getIncomingTransfers is a helper to get all incoming transfers for an account and token.
-func (tt *TransferTracker) getIncomingTransfers(account, token common.Address) []*TransferRecord {
-	records := make([]*TransferRecord, 0)
-	for _, tx := range tt.transfers {
-		if tx.To == account && tx.Token == token {
-			records = append(records, tx)
+func contains[T comparable](slice []T, value T) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
 		}
 	}
-	return records
-}
-
-// getOutgoingTransfers is a helper to get all outgoing transfers for an account and token.
-func (tt *TransferTracker) getOutgoingTransfers(account, token common.Address) []*TransferRecord {
-	records := make([]*TransferRecord, 0)
-	for _, tx := range tt.transfers {
-		if tx.From == account && tx.Token == token {
-			records = append(records, tx)
-		}
-	}
-	return records
-}
-
-// FindOriginalSources 追踪一个账户收到特定代币的来源。
-// 它优先考虑“经济来源”。如果一个账户转出一种代币并收到另一种代币（类似Swap），
-// 那么该账户本身被视为其收到代币的来源。
-// 如果不是类似Swap的场景（例如简单的转账），它将回退到追踪代币的物理路径，
-// 找到在此交易中最初发送该代币的账户。
-func (tt *TransferTracker) FindOriginalSources(account, token common.Address) []common.Address {
-	// --- 经济来源启发式判断 ---
-	// 检查账户是否收到了该代币。
-	hasReceivedToken := false
-	for _, tx := range tt.transfers {
-		if tx.To == account && tx.Token == token {
-			hasReceivedToken = true
-			break
-		}
-	}
-	if !hasReceivedToken {
-		return nil // 没有收到此代币，无需寻找来源。
-	}
-
-	// 检查账户是否转出了任何 *其他* 代币。如果是，这很可能是一次Swap，
-	// 账户本身就是经济来源。
-	hasSentOtherToken := false
-	for _, tx := range tt.transfers {
-		if tx.From == account && tx.Token != token {
-			hasSentOtherToken = true
-			break
-		}
-	}
-
-	if hasSentOtherToken {
-		// 类似Swap的活动，账户本身是来源。
-		return []common.Address{account}
-	}
-
-	// --- 物理来源追踪 (回退) ---
-	// 如果不是Swap（例如，简单的收款），则追踪物理来源。
-	memo := make(map[common.Address][]common.Address)
-	path := make(map[common.Address]bool)
-	return tt.findSourcesRecursive(account, token, memo, path)
-}
-
-func (tt *TransferTracker) findSourcesRecursive(account, token common.Address, memo map[common.Address][]common.Address, path map[common.Address]bool) []common.Address {
-	if sources, ok := memo[account]; ok {
-		return sources
-	}
-	if path[account] { // Cycle detected
-		return nil
-	}
-	path[account] = true
-	defer func() { path[account] = false }() // backtrack
-
-	incomingTransfers := tt.getIncomingTransfers(account, token)
-
-	if len(incomingTransfers) == 0 {
-		// This account has no incoming transfers for this token, so it's an original source.
-		return []common.Address{account}
-	}
-
-	var finalSources []common.Address
-	sourceMap := make(map[common.Address]bool)
-
-	for _, tx := range incomingTransfers {
-		sources := tt.findSourcesRecursive(tx.From, token, memo, path)
-		for _, source := range sources {
-			if !sourceMap[source] {
-				sourceMap[source] = true
-				finalSources = append(finalSources, source)
-			}
-		}
-	}
-
-	memo[account] = finalSources
-	return finalSources
-}
-
-// FindFinalDestinations traces forward to find accounts that were the ultimate recipients of a token from a given account.
-// A final destination is an account that received tokens (directly or indirectly) but did not send any for this token within the transaction.
-func (tt *TransferTracker) FindFinalDestinations(account, token common.Address) []common.Address {
-	memo := make(map[common.Address][]common.Address)
-	path := make(map[common.Address]bool)
-	return tt.findDestsRecursive(account, token, memo, path)
-}
-
-func (tt *TransferTracker) findDestsRecursive(account, token common.Address, memo map[common.Address][]common.Address, path map[common.Address]bool) []common.Address {
-	if dests, ok := memo[account]; ok {
-		return dests
-	}
-	if path[account] { // Cycle detected
-		return nil
-	}
-	path[account] = true
-	defer func() { path[account] = false }() // backtrack
-
-	outgoingTransfers := tt.getOutgoingTransfers(account, token)
-
-	if len(outgoingTransfers) == 0 {
-		return []common.Address{account}
-	}
-
-	var finalDests []common.Address
-	destMap := make(map[common.Address]bool)
-
-	for _, tx := range outgoingTransfers {
-		dests := tt.findDestsRecursive(tx.To, token, memo, path)
-		for _, dest := range dests {
-			if !destMap[dest] {
-				destMap[dest] = true
-				finalDests = append(finalDests, dest)
-			}
-		}
-	}
-
-	memo[account] = finalDests
-	return finalDests
+	return false
 }
 
 // ToDOT generates a string representation of the transfer graph in DOT format.
@@ -364,13 +340,4 @@ func (tt *TransferTracker) ToDOT(tokenDetails map[common.Address]*TokenPrice) st
 
 	sb.WriteString("}\n")
 	return sb.String()
-}
-
-func contains[T comparable](slice []T, value T) bool {
-	for _, item := range slice {
-		if item == value {
-			return true
-		}
-	}
-	return false
 }
