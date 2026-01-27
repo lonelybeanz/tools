@@ -1,0 +1,65 @@
+package parser
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+
+	"github.com/gagliardetto/solana-go"
+	associatedtokenaccount "github.com/gagliardetto/solana-go/programs/associated-token-account"
+	"github.com/gagliardetto/solana-go/programs/token"
+	"github.com/gagliardetto/solana-go/rpc"
+)
+
+func validateTransaction(tx *rpc.GetParsedTransactionResult) error {
+	if tx == nil || tx.Transaction == nil {
+		return errors.New("parsedTransaction is nil")
+	}
+	if len(tx.Transaction.Message.AccountKeys) == 0 {
+		return errors.New("no instructions found")
+	}
+	if len(tx.Transaction.Signatures) == 0 {
+		return errors.New("no signatures found")
+	}
+	return nil
+}
+
+func createUniqueIndex(outerIdx, innerIdx int) (int, error) {
+	prefIdx := fmt.Sprintf("%d%d", outerIdx+1, innerIdx+1)
+	return strconv.Atoi(prefIdx)
+}
+
+func isTransferInstruction(programID string) bool {
+	switch programID {
+	case solana.TokenProgramID.String(),
+		solana.Token2022ProgramID.String(),
+		solana.SystemProgramID.String():
+		return true
+	default:
+		return false
+	}
+}
+
+func IsTokenProgramId(program solana.PublicKey) bool {
+	return program == solana.TokenProgramID || program == solana.Token2022ProgramID
+}
+
+func IsSystemProgrmId(program solana.PublicKey) bool {
+	return program == solana.SystemProgramID
+}
+
+func IsATA(owner, mint, tokenAccount string) bool {
+	ownerAddress, _ := solana.PublicKeyFromBase58(owner)
+	mintAddress, _ := solana.PublicKeyFromBase58(mint)
+	tokenAccountAddress, _ := solana.PublicKeyFromBase58(tokenAccount)
+
+	associatedTokenAddress, _, err := solana.FindProgramAddress(
+		[][]byte{
+			ownerAddress.Bytes(),
+			token.ProgramID.Bytes(),
+			mintAddress.Bytes(),
+		},
+		associatedtokenaccount.ProgramID,
+	)
+	return err == nil && associatedTokenAddress == tokenAccountAddress
+}
