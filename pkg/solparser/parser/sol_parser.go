@@ -117,6 +117,9 @@ func (s *SolParser) ParseTransfer(parsedTransaction *rpc.GetParsedTransactionRes
 			})
 
 			amount, _ := new(big.Int).SetString(event.Amount, 10)
+			if amount == nil {
+				continue
+			}
 			tt.AddTransfer(transferFrom, transferTo, event.Token, amount)
 		}
 	}
