@@ -32,14 +32,14 @@ func saveAndRetryWithLimit(indexName string, buffer bytes.Buffer, retriesLeft in
 	err := SaveToEs(indexName, buffer, timeOut)
 	if err != nil {
 		if err == ErrVersionConflict {
-			esLogger.Error("版本冲突,请检查数据是否已存在")
+			// esLogger.Error("版本冲突,请检查数据是否已存在")
 			return err
 		}
-		esLogger.Error("保存数据到ES失败:", err)
+		// esLogger.Error("保存数据到ES失败:", err)
 
 		// 检查是否还有重试次数
 		if retriesLeft <= 0 {
-			esLogger.Error("保存数据到ES失败,已达到最大重试次数")
+			esLogger.Errorf("saveToEs index %s failed: %v", indexName, err)
 			return err
 		}
 
