@@ -132,6 +132,13 @@ func (s *SolParser) ParseTransfer(parsedTransaction *rpc.GetParsedTransactionRes
 
 			//账户开始金额，包含了租金费和余额
 			pre, _ := getBalance(event.From, parsedTransaction)
+			transfers = append(transfers, &Transfer{
+				From:   event.To,
+				To:     event.From,
+				Amount: new(big.Int).Sub(big.NewInt(int64(pre)), big.NewInt(2039280)).String(),
+				Token:  solana.WrappedSol.String(),
+			})
+
 			//关闭返还的SOL
 			transfers = append(transfers, &Transfer{
 				From:   event.From,

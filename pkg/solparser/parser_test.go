@@ -43,7 +43,7 @@ func TestSolParser_ParseTransferEvent(t *testing.T) {
 	ctx := context.Background()
 	opts := &rpc.GetParsedTransactionOpts{MaxSupportedTransactionVersion: intPtr,
 		Commitment: rpc.CommitmentConfirmed}
-	sig := solana.MustSignatureFromBase58("qHXLnJmGfi46DDf5ta8FL6R5DrnLwAoq33i6JNKYvZrguWHPaH91xnnXUQ9wt3fWi8V5FN9gZ7C9SNneGb2yU5B")
+	sig := solana.MustSignatureFromBase58("2uzdC71ekNk6KzhyyQQBP23kAMMEs8Y69jp5gLJqUqZaMWVLq7hSNwrbeJ1wZEa15BwdcWdV4Ph7udHsqHBg1eYP")
 	p, err := testRpc.GetParsedTransaction(ctx, sig, opts)
 	if err != nil {
 		t.Error(err)

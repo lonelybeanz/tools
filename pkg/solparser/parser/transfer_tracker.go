@@ -353,7 +353,7 @@ func (tt *TransferTracker) ToDOT(tokenDetails map[string]*TokenInfo) string {
 			fAmount := new(big.Float).SetInt(amount)
 			powerOf10 := new(big.Float).SetFloat64(math.Pow10(details.Decimal))
 			fAmount.Quo(fAmount, powerOf10)
-			label = fmt.Sprintf(`"%s %s"`, fAmount.Text('f', 6), details.Symbol)
+			label = fmt.Sprintf(`"%s %s"`, fAmount.Text('f', 9), details.Symbol)
 		} else {
 			label = fmt.Sprintf(`"%s\n%s"`, amount.String(), tokenAddr)
 		}
