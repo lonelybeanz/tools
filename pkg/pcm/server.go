@@ -1,9 +1,5 @@
 package pcm
 
-/**
- * @Description: Producer-Consumer Model
- **/
-
 import (
 	"context"
 	"crypto/rand"
@@ -11,10 +7,11 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/lonelybeanz/tools/pkg/log"
 )
 
 const QueueLen = 100000
@@ -30,6 +27,8 @@ const (
 	Stopped GoState = iota
 	// Started server is started
 	Started
+	// Stopping server is in the process of stopping
+	Stopping
 )
 
 type MsgAction func(ctx context.Context, msg interface{}, num int) (resp interface{}, err error)
@@ -57,6 +56,13 @@ type Server struct {
 	ScheduleTime              time.Duration
 	TimedTasks                []TimedTask
 	Cache                     *expirable.LRU[string, struct{}]
+
+	// 任务完成状态跟踪
+	pendingTasks  int64          // 正在处理的任务数量
+	totalTasks    int64          // 总任务数量
+	taskMutex     sync.RWMutex   // 保护任务计数器的互斥锁
+	stopWaitGroup sync.WaitGroup // 等待所有任务完成
+	stopChan      chan struct{}  // 停止通知通道
 }
 
 type TimedTask struct {
@@ -107,6 +113,9 @@ func NewSvr(serverName string, action MsgAction, timedTasks []TimedTask, opts ..
 		ScheduledTaskerExit:       []chan int{},
 		TimedTasks:                timedTasks,
 		Cache:                     cache,
+		pendingTasks:              0,
+		totalTasks:                0,
+		stopChan:                  make(chan struct{}),
 	}
 	_, ok := ServersNew.LoadOrStore(serverName, server)
 	if ok {
@@ -170,7 +179,9 @@ func (server *Server) Go() {
 
 	for i := 0; i < server.ActionGoroutineNum; i++ {
 		number := i
+		server.stopWaitGroup.Add(1)
 		go func() {
+			defer server.stopWaitGroup.Done()
 			for {
 				select {
 				case req := <-server.Queue:
@@ -188,6 +199,9 @@ func (server *Server) Go() {
 							}
 						}
 						if server.MsgActioner != nil {
+							// 增加正在处理的任务计数
+							atomic.AddInt64(&server.pendingTasks, 1)
+
 							resp, err := server.MsgActioner(req.ctx, req.msg, number)
 							if req.sync {
 								req.err = err
@@ -198,9 +212,13 @@ func (server *Server) Go() {
 								server.Cache.Remove(v.Hash())
 							}
 
+							// 减少正在处理的任务计数
+							atomic.AddInt64(&server.pendingTasks, -1)
 						}
 					}
 				case <-server.MsgActionerExit[number]:
+					return
+				case <-server.stopChan:
 					return
 				}
 			}
@@ -208,15 +226,19 @@ func (server *Server) Go() {
 	}
 	for j := 0; j < server.ScheduledTaskGoroutineNum; j++ {
 		number := j
+		server.stopWaitGroup.Add(1)
 		go func() {
+			defer server.stopWaitGroup.Done()
 			server.TimedTasks[number].Task(number)
 			for {
 				select {
 				case <-server.ScheduledTaskerExit[number]:
-					logx.Infof("[%s][%d] ScheduledTasker goroutine 退出\n", server.Name, number)
+					log.Infof("[%s][%d] ScheduledTasker goroutine 退出\n", server.Name, number)
 					return
 				case <-time.After(server.TimedTasks[number].Time):
 					server.TimedTasks[number].Task(number)
+				case <-server.stopChan:
+					return
 				}
 			}
 		}()
@@ -226,10 +248,10 @@ func (server *Server) Go() {
 }
 
 func (server *Server) Stop() {
-	if server.State == Started {
-
+	if server.State == Started || server.State == Stopping {
 		server.State = Stopped
 
+		// 通知所有goroutine退出
 		for i := 0; i < server.ActionGoroutineNum; i++ {
 			server.MsgActionerExit[i] <- 1
 		}
@@ -237,10 +259,91 @@ func (server *Server) Stop() {
 			server.ScheduledTaskerExit[i] <- 1
 		}
 
+		// 关闭停止通道
+		close(server.stopChan)
+
+		// 等待所有goroutine完成
+		server.stopWaitGroup.Wait()
+
 		close(server.Queue)
 
 		ServersNew.Delete(server.Name)
+		log.Errorf("%s server stop!!!!", server.Name)
 	}
+}
+
+// StopAfterDone 等待所有任务完成后停止服务器
+func (server *Server) StopAfterDone(timeout time.Duration) error {
+	if server.State != Started {
+		return fmt.Errorf("server is not started")
+	}
+
+	server.State = Stopping
+
+	// 创建超时上下文
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// 等待所有任务完成或超时
+	for {
+		select {
+		case <-ctx.Done():
+			// 超时，强制停止
+			log.Errorf("%s server stop timeout, force stopping...", server.Name)
+			server.Stop()
+			return fmt.Errorf("stop timeout after %v", timeout)
+		default:
+			// 检查是否所有任务都已完成
+			if server.IsAllTasksDone() {
+				log.Infof("%s all tasks completed, stopping server...", server.Name)
+				server.Stop()
+				return nil
+			}
+			// 短暂等待后继续检查
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// IsAllTasksDone 检查是否所有任务都已完成
+func (server *Server) IsAllTasksDone() bool {
+	server.taskMutex.RLock()
+	defer server.taskMutex.RUnlock()
+
+	pending := atomic.LoadInt64(&server.pendingTasks)
+	queueLen := len(server.Queue)
+
+	return pending == 0 && queueLen == 0
+}
+
+// GetTaskStats 获取任务统计信息
+func (server *Server) GetTaskStats() (pending, total int64) {
+	server.taskMutex.RLock()
+	defer server.taskMutex.RUnlock()
+
+	pending = atomic.LoadInt64(&server.pendingTasks)
+	total = atomic.LoadInt64(&server.totalTasks)
+
+	return pending, total
+}
+
+// GetPendingTaskCount 获取正在处理的任务数量
+func (server *Server) GetPendingTaskCount() int64 {
+	return atomic.LoadInt64(&server.pendingTasks)
+}
+
+// GetTotalTaskCount 获取总任务数量
+func (server *Server) GetTotalTaskCount() int64 {
+	return atomic.LoadInt64(&server.totalTasks)
+}
+
+// ResetTaskStats 重置任务统计信息
+func (server *Server) ResetTaskStats() {
+	server.taskMutex.Lock()
+	defer server.taskMutex.Unlock()
+
+	atomic.StoreInt64(&server.pendingTasks, 0)
+	atomic.StoreInt64(&server.totalTasks, 0)
 }
 
 func (server *Server) PostMsgToServer(ctx context.Context, msg interface{}) (resp interface{}, err error) {
@@ -270,6 +373,9 @@ func (server *Server) PostMsgToServer(ctx context.Context, msg interface{}) (res
 		}
 	}
 
+	// 增加总任务计数
+	atomic.AddInt64(&server.totalTasks, 1)
+
 	req := &Req{ch: make(chan interface{}), msg: msg, err: nil, ctx: ctx, sync: true}
 	server.Queue <- req
 	select {
@@ -286,8 +392,8 @@ func (server *Server) PostMsgToServer(ctx context.Context, msg interface{}) (res
 }
 
 func (server *Server) PushMsgToServer(ctx context.Context, msg interface{}) (err error) {
-	if server.State == Stopped {
-		return fmt.Errorf("server is stopped")
+	if server.State == Stopped || server.State == Stopping {
+		return fmt.Errorf("server is stopped or stopping")
 	}
 	defer func() {
 		if recover() != nil {
@@ -307,6 +413,9 @@ func (server *Server) PushMsgToServer(ctx context.Context, msg interface{}) (err
 			}
 		}
 	}
+
+	// 增加总任务计数
+	atomic.AddInt64(&server.totalTasks, 1)
 
 	req := &Req{ch: nil, msg: msg, err: nil, ctx: ctx, sync: false}
 	server.Queue <- req
