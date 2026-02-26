@@ -268,7 +268,7 @@ func (server *Server) Stop() {
 		close(server.Queue)
 
 		ServersNew.Delete(server.Name)
-		log.Errorf("%s server stop!!!!", server.Name)
+		log.Infof("%s server stop!!!!", server.Name)
 	}
 }
 
