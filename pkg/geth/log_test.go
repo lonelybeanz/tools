@@ -17,7 +17,7 @@ func TestParseTxLogs(t *testing.T) {
 	if err != nil {
 		t.Log(err)
 	}
-	txHash := "0xf6a17ef264df100099f74c5b209eb2e5d2a5324f8148ccffa814442fd33f5bf3"
+	txHash := "0xc54d1c314aa964c012d25dadbcc1c49fb5702b0aab2625c1f70abd2af137a260"
 	// 获取交易回执
 	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
 	if err != nil {
@@ -59,4 +59,42 @@ func TestParseTxLogs(t *testing.T) {
 		fmt.Println("------------------------------------------")
 	}
 
+	// --- Generate and print flow diagram ---
+	tokenDetails := make(map[common.Address]*TokenPrice)
+	allTokens := transferTracker.GetAllTokens()
+	// A simple way to populate some known tokens.
+	// For a real application, you might have a more robust way to get token info.
+	knownTokens := map[common.Address]*TokenPrice{
+		BNB.Address:  &BNB,
+		WBNB.Address: &WBNB,
+		USDT.Address: &USDT,
+		USDC.Address: &USDC,
+	}
+	for _, tokenAddr := range allTokens {
+		if details, ok := knownTokens[tokenAddr]; ok {
+			tokenDetails[tokenAddr] = details
+		}
+	}
+	// --- Generate and print flow diagram ---
+	tokenDetails = make(map[common.Address]*TokenPrice)
+	allTokens = transferTracker.GetAllTokens()
+	// A simple way to populate some known tokens.
+	// For a real application, you might have a more robust way to get token info.
+	knownTokens = map[common.Address]*TokenPrice{
+		BNB.Address:  &BNB,
+		WBNB.Address: &WBNB,
+		USDT.Address: &USDT,
+		USDC.Address: &USDC,
+	}
+	for _, tokenAddr := range allTokens {
+		if details, ok := knownTokens[tokenAddr]; ok {
+			tokenDetails[tokenAddr] = details
+		}
+	}
+
+	dotGraph := transferTracker.ToDOT(tokenDetails)
+	fmt.Println("\n--- Transfer Graph (DOT format) ---")
+	fmt.Println(dotGraph)
+	fmt.Println("--- End of Graph ---")
+	fmt.Println("\n提示: 复制以上DOT格式的文本并粘贴到Graphviz在线渲染工具中（如: https://dreampuf.github.io/GraphvizOnline/）即可查看可视化流转图。")
 }

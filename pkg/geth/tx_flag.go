@@ -14,6 +14,7 @@ var (
 		"0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67": "UniswapV3",
 		"0xde449b421e7f751324933a2c4afee2ea35f7c7d2b6bdf310e7a7017b4d67bb91": "BiV3",
 		"0x04206ad2b7c0f463bff3dd4f33c5735b0f2957a351e4f79763a4fa9e775dd237": "CLPoolManager",
+		"0xfec331350fce78ba658e082a71da20ac9f8d798a99b3c79681c8440cbfe77e07": "1Inch OrderFilled",
 	}
 	memeBot = []string{
 		"0xceCCE97529EffC360f68b3F26eEF4ad74eBF5705",
@@ -88,6 +89,10 @@ SkipToCheck:
 			return "Approve"
 		case "2e1a7d4d":
 			return "Withdraw"
+		case "a9059cbb":
+			return "Transfer"
+		case "23b872dd":
+			return "TransferFrom"
 		default:
 			return "other"
 		}

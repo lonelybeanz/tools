@@ -15,7 +15,7 @@ func init() {
 		MaxSize:     50,
 		MaxBackups:  5,
 		MaxAge:      7,
-		Level:       "info",
+		Level:       "debug",
 		Compress:    true,
 		Development: false,
 		MsgOnly:     true,
@@ -24,7 +24,17 @@ func init() {
 	esLogger, _ = log.InitLoggerWithConfig(config)
 }
 
-// WriteLog 提供服务的统一日志写入接口
+// 用于记录BLK语句
 func WriteMsgLog(message string) {
 	esLogger.Info(message)
+}
+
+// 用于记录ERROR日志
+func WriteErrorLog(message string) {
+	esLogger.Error(message)
+}
+
+// 用于记录DEBUG日志，调试
+func WriteDebugLog(message string) {
+	esLogger.Debug(message)
 }
