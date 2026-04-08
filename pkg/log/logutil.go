@@ -28,7 +28,7 @@ func isInTest() bool {
 	if args[1] == "-test.run" {
 		return true
 	}
-	return strings.Contains(os.Args[0], "debug")
+	return strings.ContainsAny(os.Args[0], "__debug_bin")
 }
 
 // Debugf 只在测试时打印
