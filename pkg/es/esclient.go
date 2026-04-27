@@ -24,8 +24,9 @@ var (
 var ErrVersionConflict = errors.New("version conflict detected (409)")
 
 const (
-	esRequestAttempts = 3
-	slowESRequest     = 3 * time.Second
+	esRequestAttempts       = 3
+	esResponseHeaderTimeout = 30 * time.Second
+	slowESRequest           = 10 * time.Second
 )
 
 var dialer = &net.Dialer{
@@ -38,7 +39,7 @@ var sharedTransport = &http.Transport{
 	MaxIdleConnsPerHost:   256,
 	MaxConnsPerHost:       256,
 	IdleConnTimeout:       90 * time.Second,
-	ResponseHeaderTimeout: 10 * time.Second, // 控制服务器响应的最大等待时间
+	ResponseHeaderTimeout: esResponseHeaderTimeout, // 控制服务器响应头的最大等待时间
 	ExpectContinueTimeout: 1 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	TLSClientConfig: &tls.Config{
@@ -122,6 +123,9 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 
 		if err != nil {
 			SafeClose(res) // Even on error, res might be non-nil with a body that needs closing.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			var netErr net.Error
 			// 检查是否是网络错误（包括超时）
 			if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
