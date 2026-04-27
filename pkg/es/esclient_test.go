@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"testing"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -15,9 +16,14 @@ type TxInfo struct {
 }
 
 func TestTime(t *testing.T) {
+	addr := os.Getenv("ES_TEST_ADDR")
+	if addr == "" {
+		t.Skip("set ES_TEST_ADDR to run Elasticsearch integration test")
+	}
+
 	// 配置带用户名和密码的 Elasticsearch 客户端
 	cfg := elasticsearch.Config{
-		Addresses: []string{"http://127.0.0.1:9200"},
+		Addresses: []string{addr},
 		Username:  "admin",
 		Password:  "1@in",
 		// Logger:    &elastictransport.JSONLogger{Output: os.Stdout}, // 打印请求/响应信息

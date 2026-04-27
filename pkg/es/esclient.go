@@ -23,18 +23,24 @@ var (
 
 var ErrVersionConflict = errors.New("version conflict detected (409)")
 
+const (
+	esRequestAttempts = 3
+	slowESRequest     = 3 * time.Second
+)
+
 var dialer = &net.Dialer{
 	Timeout:   30 * time.Second,
 	KeepAlive: 30 * time.Second,
 }
 var sharedTransport = &http.Transport{
 	DialContext:           dialer.DialContext,
-	MaxIdleConns:          100,
-	MaxIdleConnsPerHost:   100,
-	MaxConnsPerHost:       100,
+	MaxIdleConns:          256,
+	MaxIdleConnsPerHost:   256,
+	MaxConnsPerHost:       256,
 	IdleConnTimeout:       90 * time.Second,
 	ResponseHeaderTimeout: 10 * time.Second, // 控制服务器响应的最大等待时间
 	ExpectContinueTimeout: 1 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
 	TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // 跳过证书验证（⚠️ 仅限开发环境）
 	},
@@ -54,7 +60,7 @@ func EsClientStart(addressesStr, username, password string) {
 }
 
 func InitEs(addressesStr, username, password string) {
-	addresses := strings.Split(addressesStr, ",")
+	addresses := splitAddresses(addressesStr)
 	cfg := elasticsearch.Config{
 		Addresses: addresses,
 		Username:  username,
@@ -76,6 +82,18 @@ func InitEs(addressesStr, username, password string) {
 
 }
 
+func splitAddresses(addressesStr string) []string {
+	parts := strings.Split(addressesStr, ",")
+	addresses := make([]string, 0, len(parts))
+	for _, part := range parts {
+		address := strings.TrimSpace(part)
+		if address != "" {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
 func SafeClose(res *esapi.Response) {
 	if res != nil && res.Body != nil {
 		io.Copy(io.Discard, res.Body) // ✅ 保证总是关闭
@@ -93,7 +111,8 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 	esMutex.RUnlock() // 拿到 client 后即可解锁
 
 	var lastErr error
-	for i := 0; i < 3; i++ {
+	start := time.Now()
+	for i := 0; i < esRequestAttempts; i++ {
 		// ✅ 在每次循环开始时检查 context
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -106,20 +125,24 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 			var netErr net.Error
 			// 检查是否是网络错误（包括超时）
 			if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
-				esLogger.Errorf("⚠️ es request network error, retrying... (%d/3): %v", i+1, err)
+				esLogger.Errorf("es request network error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
 				lastErr = err
-				time.Sleep(time.Duration(i+1) * time.Second) // 增加重试等待时间
+				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			// 检查是否是EOF错误
 			if errors.Is(err, io.EOF) {
-				esLogger.Errorf("⚠️ es request EOF error, retrying... (%d/3): %v", i+1, err)
+				esLogger.Errorf("es request EOF error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
 				lastErr = err
-				time.Sleep(time.Duration(i+1) * time.Second)
+				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			// 对于其他未知错误，直接返回
-			return nil, fmt.Errorf("❌ es request failed: %w", err)
+			return nil, fmt.Errorf("es request failed: %w", err)
 		}
 
 		bodyBytes, readErr := io.ReadAll(res.Body)
@@ -128,18 +151,22 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 
 		if readErr != nil {
 			// 读取响应体失败，也认为是一种可重试的网络问题
-			esLogger.Errorf("es response read failed, retrying... (%d/3): %v", i+1, readErr)
+			esLogger.Errorf("es response read failed, retrying... (%d/%d): %v", i+1, esRequestAttempts, readErr)
 			lastErr = readErr
-			time.Sleep(time.Duration(i+1) * time.Second)
+			if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		if res.IsError() {
 			// 对于 5xx 系列的服务器错误，进行重试
 			if res.StatusCode >= 500 && res.StatusCode < 600 {
-				esLogger.Errorf("es response server error with status code %d, retrying... (%d/3). Body: %s", res.StatusCode, i+1, string(bodyBytes))
+				esLogger.Errorf("es response server error with status code %d, retrying... (%d/%d). Body: %s", res.StatusCode, i+1, esRequestAttempts, string(bodyBytes))
 				lastErr = fmt.Errorf("es response error with status code %d: %s", res.StatusCode, string(bodyBytes))
-				time.Sleep(time.Duration(i+1) * time.Second)
+				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			// 对于 4xx 客户端错误或其他错误，直接返回
@@ -147,15 +174,39 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 		}
 
 		// 请求成功，返回结果
+		logSlowESRequest(start, i+1)
 		return bodyBytes, nil
 	}
 
 	// 循环结束仍然失败，返回最后一次的错误
 	if lastErr != nil {
-		return nil, fmt.Errorf("es request failed after 3 retries: %w", lastErr)
+		return nil, fmt.Errorf("es request failed after %d retries: %w", esRequestAttempts, lastErr)
 	}
 
-	return nil, fmt.Errorf("es request failed after 3 retries without a specific error")
+	return nil, fmt.Errorf("es request failed after %d retries without a specific error", esRequestAttempts)
+}
+
+func retryBackoff(attempt int) time.Duration {
+	return time.Duration(attempt+1) * time.Second
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func logSlowESRequest(start time.Time, attempts int) {
+	elapsed := time.Since(start)
+	if elapsed >= slowESRequest {
+		esLogger.Warnf("es request completed slowly elapsed=%s attempts=%d", elapsed, attempts)
+	}
 }
 
 func CheckEsHealth() bool {
