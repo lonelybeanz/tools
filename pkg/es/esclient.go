@@ -129,7 +129,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 			var netErr net.Error
 			// 检查是否是网络错误（包括超时）
 			if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
-				esLogger.Errorf("es request network error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
+				esLogger.Warnf("es request network error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
 				lastErr = err
 				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
 					return nil, err
@@ -138,7 +138,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 			}
 			// 检查是否是EOF错误
 			if errors.Is(err, io.EOF) {
-				esLogger.Errorf("es request EOF error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
+				esLogger.Warnf("es request EOF error, retrying... (%d/%d): %v", i+1, esRequestAttempts, err)
 				lastErr = err
 				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
 					return nil, err
@@ -155,7 +155,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 
 		if readErr != nil {
 			// 读取响应体失败，也认为是一种可重试的网络问题
-			esLogger.Errorf("es response read failed, retrying... (%d/%d): %v", i+1, esRequestAttempts, readErr)
+			esLogger.Warnf("es response read failed, retrying... (%d/%d): %v", i+1, esRequestAttempts, readErr)
 			lastErr = readErr
 			if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
 				return nil, err
@@ -166,7 +166,7 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 		if res.IsError() {
 			// 对于 5xx 系列的服务器错误，进行重试
 			if res.StatusCode >= 500 && res.StatusCode < 600 {
-				esLogger.Errorf("es response server error with status code %d, retrying... (%d/%d). Body: %s", res.StatusCode, i+1, esRequestAttempts, string(bodyBytes))
+				esLogger.Warnf("es response server error with status code %d, retrying... (%d/%d). Body: %s", res.StatusCode, i+1, esRequestAttempts, string(bodyBytes))
 				lastErr = fmt.Errorf("es response error with status code %d: %s", res.StatusCode, string(bodyBytes))
 				if err := sleepWithContext(ctx, retryBackoff(i)); err != nil {
 					return nil, err

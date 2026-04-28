@@ -29,7 +29,7 @@ var ErrBulkRetriable = errors.New("bulk contains retriable item errors")
 
 const (
 	saveAttempts              = 3
-	saveTimeout               = 20 * time.Second
+	saveTimeout               = esResponseHeaderTimeout + 30*time.Second
 	httpStatusRequestTimeout  = 408
 	httpStatusTooManyRequests = 429
 )
@@ -66,6 +66,8 @@ func SaveAndRetry(indexName string, buffer bytes.Buffer) error {
 	return saveAndRetryWithLimit(indexName, buffer, saveAttempts)
 }
 
+var saveToEs = SaveToEs
+
 // 带重试次数限制的内部函数
 func saveAndRetryWithLimit(indexName string, buffer bytes.Buffer, attempts int) error {
 	if attempts <= 0 {
@@ -73,9 +75,9 @@ func saveAndRetryWithLimit(indexName string, buffer bytes.Buffer, attempts int) 
 	}
 
 	var lastErr error
+	start := time.Now()
 	for attempt := 1; attempt <= attempts; attempt++ {
-		start := time.Now()
-		err := SaveToEs(indexName, buffer, saveTimeout)
+		err := saveToEs(indexName, buffer, saveTimeout)
 		if err == nil {
 			logSlowBulkSave(indexName, attempt, start)
 			return nil
@@ -88,10 +90,10 @@ func saveAndRetryWithLimit(indexName string, buffer bytes.Buffer, attempts int) 
 		if attempt == attempts {
 			break
 		}
-		esLogger.Errorf("saveToEs index %s failed, retrying... (%d/%d): %v", indexName, attempt, attempts, err)
+		esLogger.Warnf("saveToEs index %s failed, retrying... (%d/%d) payload=%s timeout=%s: %v", indexName, attempt, attempts, bulkPayloadStats(buffer.Bytes()), saveTimeout, err)
 	}
 
-	esLogger.Errorf("saveToEs index %s failed after %d attempts: %v", indexName, attempts, lastErr)
+	esLogger.Errorf("saveToEs index %s failed after %d attempts payload=%s timeout=%s: %v", indexName, attempts, bulkPayloadStats(buffer.Bytes()), saveTimeout, lastErr)
 	return lastErr
 }
 
@@ -106,6 +108,7 @@ func SaveToEs(indexName string, buffer bytes.Buffer, timeOut time.Duration) erro
 	bodyBytes, err := DoESRequest(ctx, func(ctx context.Context, client *elasticsearch.Client) (*esapi.Response, error) {
 		opts := []func(*esapi.BulkRequest){
 			client.Bulk.WithContext(ctx),
+			client.Bulk.WithTimeout(timeOut),
 		}
 		if strings.TrimSpace(indexName) != "" {
 			opts = append(opts, client.Bulk.WithIndex(indexName))
@@ -178,6 +181,29 @@ func isRetriableError(err error) bool {
 	}
 	var netErr net.Error
 	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
+}
+
+func bulkPayloadStats(payload []byte) string {
+	lines := 0
+	ops := 0
+	for _, line := range bytes.Split(payload, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		lines++
+		var action map[string]json.RawMessage
+		if err := json.Unmarshal(line, &action); err != nil {
+			continue
+		}
+		for key := range action {
+			switch key {
+			case "index", "create", "update", "delete":
+				ops++
+			}
+		}
+	}
+	return fmt.Sprintf("bytes=%d lines=%d ops=%d", len(payload), lines, ops)
 }
 
 func logSlowBulkSave(indexName string, attempt int, start time.Time) {
