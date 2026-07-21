@@ -3,6 +3,7 @@ package es
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,25 @@ func TestDoESRequestRejectsNilResponse(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "nil response") {
 		t.Fatalf("expected nil response error, got %v", err)
+	}
+}
+
+func TestDoESRequestRejectsNilResponseBody(t *testing.T) {
+	esMutex.Lock()
+	oldClient := EsClient
+	EsClient = &elasticsearch.Client{}
+	esMutex.Unlock()
+	defer func() {
+		esMutex.Lock()
+		EsClient = oldClient
+		esMutex.Unlock()
+	}()
+
+	_, err := DoESRequest(context.Background(), func(context.Context, *elasticsearch.Client) (*esapi.Response, error) {
+		return &esapi.Response{StatusCode: http.StatusOK}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "nil response body") {
+		t.Fatalf("expected nil response body error, got %v", err)
 	}
 }
 
