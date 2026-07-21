@@ -3,12 +3,13 @@ package es
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/elastic/go-elasticsearch/v9"
+	"github.com/elastic/go-elasticsearch/v9/esapi"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -58,6 +59,44 @@ func TestDoESRequestDoesNotRetryAfterContextCancellation(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("expected one attempt after context cancellation, got %d", attempts)
+	}
+}
+
+func TestDoESRequestRejectsNilResponse(t *testing.T) {
+	esMutex.Lock()
+	oldClient := EsClient
+	EsClient = &elasticsearch.Client{}
+	esMutex.Unlock()
+	defer func() {
+		esMutex.Lock()
+		EsClient = oldClient
+		esMutex.Unlock()
+	}()
+
+	_, err := DoESRequest(context.Background(), func(context.Context, *elasticsearch.Client) (*esapi.Response, error) {
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "nil response") {
+		t.Fatalf("expected nil response error, got %v", err)
+	}
+}
+
+func TestDoESRequestRejectsNilResponseBody(t *testing.T) {
+	esMutex.Lock()
+	oldClient := EsClient
+	EsClient = &elasticsearch.Client{}
+	esMutex.Unlock()
+	defer func() {
+		esMutex.Lock()
+		EsClient = oldClient
+		esMutex.Unlock()
+	}()
+
+	_, err := DoESRequest(context.Background(), func(context.Context, *elasticsearch.Client) (*esapi.Response, error) {
+		return &esapi.Response{StatusCode: http.StatusOK}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "nil response body") {
+		t.Fatalf("expected nil response body error, got %v", err)
 	}
 }
 

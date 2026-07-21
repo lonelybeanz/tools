@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v9"
 )
 
 type TxInfo struct {
@@ -24,8 +24,8 @@ func TestTime(t *testing.T) {
 	// 配置带用户名和密码的 Elasticsearch 客户端
 	cfg := elasticsearch.Config{
 		Addresses: []string{addr},
-		Username:  "admin",
-		Password:  "1@in",
+		Username:  os.Getenv("ES_TEST_USERNAME"),
+		Password:  os.Getenv("ES_TEST_PASSWORD"),
 		// Logger:    &elastictransport.JSONLogger{Output: os.Stdout}, // 打印请求/响应信息
 	}
 	client, err := elasticsearch.NewClient(cfg)

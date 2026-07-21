@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/elastic/go-elasticsearch/v9"
+	"github.com/elastic/go-elasticsearch/v9/esapi"
 )
 
 var (
@@ -147,6 +147,12 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 			}
 			// 对于其他未知错误，直接返回
 			return nil, fmt.Errorf("es request failed: %w", err)
+		}
+		if res == nil {
+			return nil, errors.New("es request returned nil response")
+		}
+		if res.Body == nil {
+			return nil, errors.New("es request returned nil response body")
 		}
 
 		bodyBytes, readErr := io.ReadAll(res.Body)
