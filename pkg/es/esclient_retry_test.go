@@ -61,6 +61,25 @@ func TestDoESRequestDoesNotRetryAfterContextCancellation(t *testing.T) {
 	}
 }
 
+func TestDoESRequestRejectsNilResponse(t *testing.T) {
+	esMutex.Lock()
+	oldClient := EsClient
+	EsClient = &elasticsearch.Client{}
+	esMutex.Unlock()
+	defer func() {
+		esMutex.Lock()
+		EsClient = oldClient
+		esMutex.Unlock()
+	}()
+
+	_, err := DoESRequest(context.Background(), func(context.Context, *elasticsearch.Client) (*esapi.Response, error) {
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "nil response") {
+		t.Fatalf("expected nil response error, got %v", err)
+	}
+}
+
 func TestDoESRequestLogsRecoveredRetryAsWarning(t *testing.T) {
 	core, observed := observer.New(zapcore.DebugLevel)
 	oldLogger := esLogger

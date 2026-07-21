@@ -148,6 +148,9 @@ func DoESRequest(ctx context.Context, req func(ctx context.Context, client *elas
 			// 对于其他未知错误，直接返回
 			return nil, fmt.Errorf("es request failed: %w", err)
 		}
+		if res == nil {
+			return nil, errors.New("es request returned nil response")
+		}
 
 		bodyBytes, readErr := io.ReadAll(res.Body)
 		// It's crucial to close the body right after reading
