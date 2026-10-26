@@ -1,0 +1,41 @@
+{
+  "total_count": 3,
+  "workflows": [
+    {
+      "id": 396592679,
+      "node_id": "W_kwDOQklZCs4Xo4Yn",
+      "name": "e02 runner probe",
+      "path": ".github/workflows/e02-runner-probe.yml",
+      "state": "active",
+      "created_at": "2026-10-26T02:55:10.000Z",
+      "updated_at": "2026-10-26T02:55:10.000Z",
+      "url": "https://api.github.com/repos/lonelybeanz/tools/actions/workflows/396592679",
+      "html_url": "https://github.com/lonelybeanz/tools/blob/main/.github/workflows/e02-runner-probe.yml",
+      "badge_url": "https://github.com/lonelybeanz/tools/workflows/e02%20runner%20probe/badge.svg"
+    },
+    {
+      "id": 396591967,
+      "node_id": "W_kwDOQklZCs4Xo4Nf",
+      "name": "E05 selfhosted only",
+      "path": ".github/workflows/e05-sh.yml",
+      "state": "active",
+      "created_at": "2026-10-26T02:54:05.000Z",
+      "updated_at": "2026-10-26T02:54:05.000Z",
+      "url": "https://api.github.com/repos/lonelybeanz/tools/actions/workflows/396591967",
+      "html_url": "https://github.com/lonelybeanz/tools/blob/main/.github/workflows/e05-sh.yml",
+      "badge_url": "https://github.com/lonelybeanz/tools/workflows/E05%20selfhosted%20only/badge.svg"
+    },
+    {
+      "id": 396522714,
+      "node_id": "W_kwDOQklZCs4XonTa",
+      "name": "f04 secrets",
+      "path": ".github/workflows/f04-secrets.yml",
+      "state": "active",
+      "created_at": "2026-10-26T00:47:46.000Z",
+      "updated_at": "2026-10-26T00:47:46.000Z",
+      "url": "https://api.github.com/repos/lonelybeanz/tools/actions/workflows/396522714",
+      "html_url": "https://github.com/lonelybeanz/tools/blob/main/.github/workflows/f04-secrets.yml",
+      "badge_url": "https://github.com/lonelybeanz/tools/workflows/f04%20secrets/badge.svg"
+    }
+  ]
+}
